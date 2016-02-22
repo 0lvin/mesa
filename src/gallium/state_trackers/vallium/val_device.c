@@ -12,6 +12,10 @@ val_physical_device_init(struct val_physical_device *device,
    device->instance = instance;
    device->pld = pld;
 
+   device->pscreen = pipe_loader_create_screen(device->pld);
+   if (!device->pscreen)
+     return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
    return VK_SUCCESS;
 }
 
@@ -103,7 +107,7 @@ VkResult val_CreateInstance(
    instance = val_alloc2(&default_alloc, pAllocator, sizeof(*instance), 8,
                          VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!instance)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+     return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
    instance->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
 
@@ -492,11 +496,7 @@ VkResult val_CreateDevice(
 
    val_queue_init(device, &device->queue);
 
-   device->screen = pipe_loader_create_screen(physical_device->pld);
-   if (!device->screen) {
-     val_free(&device->alloc, device);
-     return VK_ERROR_OUT_OF_HOST_MEMORY;
-   }
+   device->screen = physical_device->pscreen;
 
    *pDevice = val_device_to_handle(device);
 

@@ -181,6 +181,7 @@ struct val_physical_device {
     struct val_instance *                       instance;
 
     struct pipe_loader_device *pld;
+    struct pipe_screen *pscreen;
 };
 
 struct val_wsi_interaface;
@@ -217,7 +218,7 @@ struct val_device {
 
    struct val_queue queue;
    struct val_instance *                       instance;
-
+   struct val_physical_device *physical_device;
    struct pipe_screen *screen;
 };
 
