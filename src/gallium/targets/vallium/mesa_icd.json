@@ -1,0 +1,7 @@
+{
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": "/home/airlied/devel/vulkan/intel/mesa/src/gallium/targets/vallium/.libs/libVK_Mesa.so",
+        "abi_versions": "1.0.0"
+    }
+}

@@ -938,6 +938,12 @@ AC_ARG_ENABLE([gallium-tests],
     [enable_gallium_tests="$enableval"],
     [enable_gallium_tests=no])
 
+AC_ARG_ENABLE([vallium],
+   [AS_HELP_STRING([--enable-vallium],
+         [enable vallium library @<:@default=disabled@:>@])],
+   [enable_vallium="$enableval"],
+   [enable_vallium=no])
+
 # Option for Gallium drivers
 
 # Keep this in sync with the --with-gallium-drivers help string default value
@@ -967,7 +973,8 @@ if test "x$enable_opengl" = xno -a \
         "x$enable_vdpau" = xno -a \
         "x$enable_omx" = xno -a \
         "x$enable_va" = xno -a \
-        "x$enable_opencl" = xno; then
+        "x$enable_opencl" = xno -a \
+        "x$enable_vallium" = xno; then
     AC_MSG_ERROR([at least one API should be enabled])
 fi
 
@@ -1798,6 +1805,11 @@ if test "x$enable_va" = xyes; then
 fi
 AM_CONDITIONAL(HAVE_ST_VA, test "x$enable_va" = xyes)
 
+if test "x$enable_vallium" = xyes; then
+    gallium_st="$gallium_st vallium"
+fi
+AM_CONDITIONAL(HAVE_ST_VALLIUM, test "x$enable_vallium" = xyes)
+
 dnl
 dnl Nine Direct3D9 configuration
 dnl
@@ -1877,6 +1889,20 @@ fi
 AM_CONDITIONAL(HAVE_CLOVER, test "x$enable_opencl" = xyes)
 AM_CONDITIONAL(HAVE_CLOVER_ICD, test "x$enable_opencl_icd" = xyes)
 AC_SUBST([OPENCL_LIBNAME])
+
+if test "x$enable_vallium" = xyes; then
+   enable_gallium_loader=yes
+   if test x"$enable_dri3" = xno; then
+        AC_MSG_ERROR([vallium requires dri3])
+   fi
+   VALLIUM_LIBNAME="VK_Mesa"
+   PKG_CHECK_EXISTS([xcb >= $XCB_REQUIRED], [], AC_MSG_ERROR([VULKAN requires xcb >= $XCB_REQUIRED]))
+   PKG_CHECK_MODULES([VALLIUM], [xcb-dri3 xcb-present])
+fi
+AM_CONDITIONAL(HAVE_VALLIUM, test "x$enable_vallium" = xyes)
+AC_SUBST([VALLIUM_LIBNAME])
+AC_SUBST([VALLIUM_CFLAGS])
+AC_SUBST([VALLIUM_LIBS])
 
 dnl
 dnl Gallium configuration
@@ -2582,6 +2608,7 @@ AC_CONFIG_FILES([Makefile
 		src/gallium/state_trackers/omx/Makefile
 		src/gallium/state_trackers/osmesa/Makefile
 		src/gallium/state_trackers/va/Makefile
+		src/gallium/state_trackers/vallium/Makefile
 		src/gallium/state_trackers/vdpau/Makefile
 		src/gallium/state_trackers/xa/Makefile
 		src/gallium/state_trackers/xvmc/Makefile
@@ -2596,6 +2623,7 @@ AC_CONFIG_FILES([Makefile
 		src/gallium/targets/osmesa/osmesa.pc
 		src/gallium/targets/pipe-loader/Makefile
 		src/gallium/targets/va/Makefile
+		src/gallium/targets/vallium/Makefile
 		src/gallium/targets/vdpau/Makefile
 		src/gallium/targets/xa/Makefile
 		src/gallium/targets/xa/xatracker.pc

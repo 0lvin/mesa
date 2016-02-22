@@ -154,6 +154,10 @@ if HAVE_ST_VA
 SUBDIRS += state_trackers/va targets/va
 endif
 
+if HAVE_ST_VALLIUM
+SUBDIRS += state_trackers/vallium targets/vallium
+endif
+
 if HAVE_ST_VDPAU
 SUBDIRS += state_trackers/vdpau targets/vdpau
 endif
