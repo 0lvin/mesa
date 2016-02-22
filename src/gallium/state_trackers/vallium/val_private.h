@@ -10,6 +10,8 @@
 #include "util/macros.h"
 #include "util/list.h"
 
+#include "pipe/p_screen.h"
+
 /* Pre-declarations needed for WSI entrypoints */
 struct wl_surface;
 struct wl_display;
@@ -177,6 +179,8 @@ val_free2(const VkAllocationCallbacks *parent_alloc,
 struct val_physical_device {
     VK_LOADER_DATA                              _loader_data;
     struct val_instance *                       instance;
+
+    struct pipe_loader_device *pld;
 };
 
 struct val_wsi_interaface;
@@ -191,6 +195,9 @@ struct val_instance {
    struct val_physical_device physicalDevice;
 
    struct val_wsi_interface *                  wsi[VK_ICD_WSI_PLATFORM_MAX];
+
+   struct pipe_loader_device *devs;
+   int num_devices;
 };
 
 VkResult val_init_wsi(struct val_instance *instance);
@@ -210,6 +217,8 @@ struct val_device {
 
    struct val_queue queue;
    struct val_instance *                       instance;
+
+   struct pipe_screen *screen;
 };
 
 void val_device_get_cache_uuid(void *uuid);

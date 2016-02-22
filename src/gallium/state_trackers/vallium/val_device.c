@@ -1,13 +1,16 @@
 
 #include "val_private.h"
 
+#include "pipe-loader/pipe_loader.h"
 #include "mesa/main/git_sha1.h"
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
-                         struct val_instance *instance)
+                         struct val_instance *instance,
+			 struct pipe_loader_device *pld)
 {
    device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
    device->instance = instance;
+   device->pld = pld;
 
    return VK_SUCCESS;
 }
@@ -147,8 +150,16 @@ VkResult val_EnumeratePhysicalDevices(
    VkResult result;
 
    if (instance->physicalDeviceCount < 0) {
+
+      /* sw only for now */
+      instance->num_devices = pipe_loader_sw_probe(NULL, 0);
+
+      assert(instance->num_devices == 1);
+
+      pipe_loader_sw_probe(&instance->devs, instance->num_devices);
+
       result = val_physical_device_init(&instance->physicalDevice,
-                                        instance);
+                                        instance, &instance->devs[0]);
       if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
          instance->physicalDeviceCount = 0;
       } else if (result == VK_SUCCESS) {
@@ -480,6 +491,12 @@ VkResult val_CreateDevice(
       device->alloc = physical_device->instance->alloc;
 
    val_queue_init(device, &device->queue);
+
+   device->screen = pipe_loader_create_screen(physical_device->pld);
+   if (!device->screen) {
+     val_free(&device->alloc, device);
+     return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
 
    *pDevice = val_device_to_handle(device);
 
