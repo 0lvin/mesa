@@ -155,6 +155,14 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
                                          struct rendering_state *state)
 {
+   int i;
+   /* this will set framebuffer state and do initial clearing */
+   state->framebuffer.width = cmd->u.begin_render_pass.framebuffer->width;
+   state->framebuffer.height = cmd->u.begin_render_pass.framebuffer->height;
+
+   for (i = 0 ; i < cmd->u.begin_render_pass.framebuffer->attachment_count; i++) {
+      struct val_image_view *img = cmd->u.begin_render_pass.framebuffer->attachments[i];
+   }
    return VK_SUCCESS;
 }
 

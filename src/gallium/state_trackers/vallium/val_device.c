@@ -3,6 +3,8 @@
 
 #include "pipe-loader/pipe_loader.h"
 #include "mesa/main/git_sha1.h"
+
+#include "pipe/p_state.h"
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
@@ -759,12 +761,25 @@ void val_GetDeviceMemoryCommitment(
 }
 
 VkResult val_BindBufferMemory(
-    VkDevice                                    device,
+    VkDevice                                    _device,
     VkBuffer                                    _buffer,
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
+   if (mem) {
+      device->pscreen->resource_allocate_backing(device->pscreen,
+                                                 buffer->bo,
+                                                 mem->pmem,
+                                                 memoryOffset);
+   } else {
+      device->pscreen->resource_remove_backing(device->pscreen,
+                                               buffer->bo);
+   }
+   return VK_SUCCESS;
 }
 
 VkResult val_BindImageMemory(
@@ -827,7 +842,35 @@ VkResult val_CreateBuffer(
     const VkAllocationCallbacks*                pAllocator,
     VkBuffer*                                   pBuffer)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   struct val_buffer *buffer;
 
+   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+
+   buffer = val_alloc2(&device->alloc, pAllocator, sizeof(*buffer), 8,
+                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (buffer == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   buffer->size = pCreateInfo->size;
+   buffer->usage = pCreateInfo->usage;
+   buffer->offset = 0;
+
+   {
+      struct pipe_resource template;
+      memset(&template, 0, sizeof(struct pipe_resource));
+      template.screen = device->pscreen;
+      template.target = PIPE_BUFFER;
+      template.format = PIPE_FORMAT_R8_UNORM;
+      template.width0 = buffer->size;
+
+      buffer->bo = device->pscreen->resource_create_unbacked(device->pscreen,
+                                                             &template,
+                                                             &buffer->total_size);
+   }
+   *pBuffer = val_buffer_to_handle(buffer);
+
+   return VK_SUCCESS;
 }
 
 void val_DestroyBuffer(
@@ -835,7 +878,10 @@ void val_DestroyBuffer(
     VkBuffer                                    _buffer,
     const VkAllocationCallbacks*                pAllocator)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
+   val_free2(&device->alloc, pAllocator, buffer);
 }
 
 void val_DestroySampler(
@@ -852,6 +898,31 @@ VkResult val_CreateFramebuffer(
     const VkAllocationCallbacks*                pAllocator,
     VkFramebuffer*                              pFramebuffer)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   struct val_framebuffer *framebuffer;
+
+   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+
+   size_t size = sizeof(*framebuffer) +
+                 sizeof(struct val_image_view *) * pCreateInfo->attachmentCount;
+   framebuffer = val_alloc2(&device->alloc, pAllocator, size, 8,
+                            VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (framebuffer == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   framebuffer->attachment_count = pCreateInfo->attachmentCount;
+   for (uint32_t i = 0; i < pCreateInfo->attachmentCount; i++) {
+      VkImageView _iview = pCreateInfo->pAttachments[i];
+      framebuffer->attachments[i] = val_image_view_from_handle(_iview);
+   }
+
+   framebuffer->width = pCreateInfo->width;
+   framebuffer->height = pCreateInfo->height;
+   framebuffer->layers = pCreateInfo->layers;
+
+   *pFramebuffer = val_framebuffer_to_handle(framebuffer);
+
+   return VK_SUCCESS;
 }
 
 void val_DestroyFramebuffer(
@@ -859,7 +930,12 @@ void val_DestroyFramebuffer(
     VkFramebuffer                               _fb,
     const VkAllocationCallbacks*                pAllocator)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_framebuffer, fb, _fb);
+
+   val_free2(&device->alloc, pAllocator, fb);
 }
+
 
 VkResult val_WaitForFences(
     VkDevice                                    _device,

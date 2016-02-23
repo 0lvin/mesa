@@ -153,7 +153,7 @@ void val_CmdBeginRenderPass(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    VAL_FROM_HANDLE(val_render_pass, pass, pRenderPassBegin->renderPass);
-//   VAL_FROM_HANDLE(val_framebuffer, framebuffer, pRenderPassBegin->framebuffer);
+   VAL_FROM_HANDLE(val_framebuffer, framebuffer, pRenderPassBegin->framebuffer);
    struct val_cmd_buffer_entry *cmd;
 
    cmd = val_alloc(&cmd_buffer->pool->alloc,
@@ -163,6 +163,14 @@ void val_CmdBeginRenderPass(
       return;
 
    cmd->cmd_type = VAL_CMD_BEGIN_RENDER_PASS;
+
+   cmd->u.begin_render_pass.render_pass = pass;
+   cmd->u.begin_render_pass.framebuffer = framebuffer;
+   cmd->u.begin_render_pass.render_area = pRenderPassBegin->renderArea;
+   cmd->u.begin_render_pass.clear_value_count = pRenderPassBegin->clearValueCount;
+   cmd->u.begin_render_pass.clear_values = malloc(cmd->u.begin_render_pass.clear_value_count * sizeof(VkClearValue));
+   memcpy(cmd->u.begin_render_pass.clear_values, pRenderPassBegin->pClearValues,
+          sizeof(VkClearValue) * cmd->u.begin_render_pass.clear_value_count);
 
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
@@ -190,9 +198,7 @@ void val_CmdBindVertexBuffers(
    cmd->u.vertex_buffers.buffers = (const struct val_buffer *)pBuffers;
    cmd->u.vertex_buffers.offsets = pOffsets;
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
-
 }
-
 
 void val_CmdBindPipeline(
     VkCommandBuffer                             commandBuffer,

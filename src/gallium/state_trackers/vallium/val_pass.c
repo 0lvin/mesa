@@ -23,7 +23,7 @@ VkResult val_CreateRenderPass(
    if (pass == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-      /* Clear the subpasses along with the parent pass. This required because
+   /* Clear the subpasses along with the parent pass. This required because
     * each array member of val_subpass must be a valid pointer if not NULL.
     */
    memset(pass, 0, size);

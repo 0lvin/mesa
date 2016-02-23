@@ -101,6 +101,7 @@ VAL_DEFINE_NONDISP_HANDLE_CASTS(val_buffer, VkBuffer)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set, VkDescriptorSet)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set_layout, VkDescriptorSetLayout)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_device_memory, VkDeviceMemory)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_framebuffer, VkFramebuffer)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_image, VkImage)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_image_view, VkImageView);
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_pipeline_cache, VkPipelineCache)
@@ -280,6 +281,10 @@ struct val_image {
 struct val_image_view {
    const struct val_image *image; /**< VkImageViewCreateInfo::image */
 
+   VkImageViewType view_type;
+   VkFormat format;
+   VkComponentMapping components;
+   VkImageSubresourceRange subresourceRange;
 };
 
 struct val_subpass {
@@ -310,6 +315,15 @@ struct val_render_pass {
 
 struct val_sampler {
    uint32_t state[4];
+};
+
+struct val_framebuffer {
+   uint32_t                                     width;
+   uint32_t                                     height;
+   uint32_t                                     layers;
+
+   uint32_t                                     attachment_count;
+   struct val_image_view *                      attachments[0];
 };
 
 struct val_descriptor_set_binding_layout {
@@ -391,6 +405,9 @@ struct val_buffer {
 
    VkBufferUsageFlags                           usage;
    VkDeviceSize                                 offset;
+
+   struct pipe_resource *bo;
+   uint64_t total_size;
 };
    
 struct val_cmd_pool {
@@ -428,7 +445,11 @@ struct val_cmd_bind_descriptor_sets {
 };
 
 struct val_cmd_begin_render_pass {
-   
+   struct val_framebuffer *framebuffer;
+   struct val_render_pass *render_pass;
+   VkRect2D render_area;
+   uint32_t clear_value_count;
+   const VkClearValue *clear_values;
 };
 
 struct val_cmd_draw {
@@ -445,6 +466,7 @@ struct val_cmd_buffer_entry {
       struct val_cmd_bind_pipeline pipeline;
       struct val_cmd_bind_vertex_buffers vertex_buffers;
       struct val_cmd_bind_descriptor_sets descriptor_sets;
+      struct val_cmd_begin_render_pass begin_render_pass;
       struct val_cmd_draw draw;
    } u;
 };
