@@ -459,6 +459,9 @@ struct val_cmd_buffer {
 
    struct list_head                             cmds;
 };
+
+VkResult val_execute_cmds(struct val_device *device,
+                          struct val_cmd_buffer *cmd_buffer) ;
 #ifdef __cplusplus
 }
 #endif

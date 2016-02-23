@@ -604,10 +604,7 @@ VkResult val_QueueSubmit(
       for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; j++) {
          VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer,
                          pSubmits[i].pCommandBuffers[j]);
-         struct val_cmd_buffer_entry *cmd;
-         LIST_FOR_EACH_ENTRY(cmd, &cmd_buffer->cmds, cmd_link) {
-            fprintf(stderr, "cmd type %d\n", cmd->cmd_type);
-         }
+         val_execute_cmds(device, cmd_buffer);
       }
    }
    return VK_SUCCESS;

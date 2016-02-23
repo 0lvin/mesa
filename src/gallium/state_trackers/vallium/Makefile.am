@@ -19,6 +19,7 @@ VALLIUM_SOURCES = \
 	val_device.c \
 	val_cmd_buffer.c \
 	val_descriptor_set.c \
+	val_execute.c \
 	val_util.c \
 	val_image.c \
 	val_formats.c \
