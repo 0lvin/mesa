@@ -275,6 +275,27 @@ struct pipe_screen {
     */
    void (*query_memory_info)(struct pipe_screen *screen,
                              struct pipe_memory_info *info);
+
+   struct pipe_resource * (*resource_create_unbacked)(struct pipe_screen *,
+						      const struct pipe_resource *templat,
+                                                      uint64_t *size_required);
+
+   struct pipe_memory_allocation *(*allocate_memory)(struct pipe_screen *screen,
+                                                     uint64_t size);
+   void (*free_memory)(struct pipe_screen *screen,
+                       struct pipe_memory_allocation *);
+   void (*resource_allocate_backing)(struct pipe_screen *screen,
+				     struct pipe_resource *pt,
+                                     struct pipe_memory_allocation *pmem,
+                                     uint64_t offset);
+   void (*resource_remove_backing)(struct pipe_screen *screen,
+                                   struct pipe_resource *pt);
+
+   void *(*map_memory)(struct pipe_screen *screen,
+                       struct pipe_memory_allocation *pmem);
+
+   void (*unmap_memory)(struct pipe_screen *screen,
+                        struct pipe_memory_allocation *pmem);
 };
 
 

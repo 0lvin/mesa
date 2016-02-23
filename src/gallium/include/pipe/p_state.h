@@ -461,6 +461,7 @@ struct pipe_resource
    unsigned flags;           /**< bitmask of PIPE_RESOURCE_FLAG_x */
 };
 
+struct pipe_memory_allocation;
 
 /**
  * Transfer object.  For data transfer to/from a resource.
