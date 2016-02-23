@@ -5,6 +5,8 @@
 #include "mesa/main/git_sha1.h"
 
 #include "pipe/p_state.h"
+#include "state_tracker/drisw_api.h"
+
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
@@ -147,6 +149,32 @@ void val_DestroyInstance(
    val_free(&instance->alloc, instance);
 }
 
+static void val_get_image(struct dri_drawable *dri_drawable,
+                          int x, int y, unsigned width, unsigned height, unsigned stride,
+                          void *data)
+{
+
+}
+
+static void val_put_image(struct dri_drawable *dri_drawable,
+                          void *data, unsigned width, unsigned height)
+{
+   fprintf(stderr, "put image %dx%d\n", width, height);
+}
+
+static void val_put_image2(struct dri_drawable *dri_drawable,
+                           void *data, int x, int y, unsigned width, unsigned height,
+                           unsigned stride)
+{
+   fprintf(stderr, "put image 2 %d,%d %dx%d\n", x, y, width, height);
+}
+                          
+static struct drisw_loader_funcs val_sw_lf = {
+   .get_image = val_get_image,
+   .put_image = val_put_image,
+   .put_image2 = val_put_image2,
+};
+   
 VkResult val_EnumeratePhysicalDevices(
 				      VkInstance                                  _instance,
 				      uint32_t*                                   pPhysicalDeviceCount,
@@ -162,7 +190,8 @@ VkResult val_EnumeratePhysicalDevices(
 
       assert(instance->num_devices == 1);
 
-      pipe_loader_sw_probe(&instance->devs, instance->num_devices);
+      pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf);
+
 
       result = val_physical_device_init(&instance->physicalDevice,
                                         instance, &instance->devs[0]);
@@ -783,12 +812,25 @@ VkResult val_BindBufferMemory(
 }
 
 VkResult val_BindImageMemory(
-    VkDevice                                    device,
+    VkDevice                                    _device,
     VkImage                                     _image,
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+   VAL_FROM_HANDLE(val_image, image, _image);
 
+   if (mem) {
+      device->pscreen->resource_allocate_backing(device->pscreen,
+                                                 image->bo,
+                                                 mem->pmem,
+                                                 memoryOffset);
+   } else {
+      device->pscreen->resource_remove_backing(device->pscreen,
+                                               image->bo);
+   }
+   return VK_SUCCESS;
 }
 
 VkResult val_QueueBindSparse(

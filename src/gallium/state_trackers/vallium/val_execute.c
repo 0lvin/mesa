@@ -169,7 +169,7 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
 
          memset(&template, 0, sizeof(struct pipe_surface));
 
-         template.format = 0;
+         template.format = vk_format_to_pipe(cmd->u.begin_render_pass.render_pass->attachments[0].format);
          template.width = cmd->u.begin_render_pass.framebuffer->width;
          template.height = cmd->u.begin_render_pass.framebuffer->height;
          imgv->surface = state->pctx->create_surface(state->pctx,
@@ -208,6 +208,7 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_end_render_pass(struct val_cmd_buffer_entry *cmd,
                                 struct rendering_state *state)
 {
+   state->pctx->flush(state->pctx, NULL, 0);
    return VK_SUCCESS;
 }
 

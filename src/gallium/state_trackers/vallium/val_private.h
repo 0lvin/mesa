@@ -276,9 +276,22 @@ struct val_device_memory {
 struct val_image {
    VkImageType type;
    VkFormat vk_format;
+   VkDeviceSize size;
    struct pipe_resource *bo;
 };
 
+struct val_image_create_info {
+   const VkImageCreateInfo *vk_info;
+   uint32_t bind_flags;
+   uint32_t stride;
+};
+
+VkResult
+val_image_create(VkDevice _device,
+                 const struct val_image_create_info *create_info,
+                 const VkAllocationCallbacks* alloc,
+                 VkImage *pImage);
+   
 struct val_image_view {
    const struct val_image *image; /**< VkImageViewCreateInfo::image */
 
@@ -487,7 +500,9 @@ struct val_cmd_buffer {
 };
 
 VkResult val_execute_cmds(struct val_device *device,
-                          struct val_cmd_buffer *cmd_buffer) ;
+                          struct val_cmd_buffer *cmd_buffer);
+
+enum pipe_format vk_format_to_pipe(VkFormat format);
 #ifdef __cplusplus
 }
 #endif

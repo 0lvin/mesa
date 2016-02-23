@@ -6,13 +6,15 @@ static enum pipe_format format_to_vk_table[VK_FORMAT_END_RANGE] = {
    COMMON_NAME(R8_SNORM),
    COMMON_NAME(R8G8B8A8_UNORM),
    COMMON_NAME(B8G8R8A8_UNORM),
+   COMMON_NAME(R8G8B8A8_SRGB),
+   COMMON_NAME(B8G8R8A8_SRGB),
    [VK_FORMAT_D16_UNORM] = PIPE_FORMAT_Z16_UNORM,
    [VK_FORMAT_D24_UNORM_S8_UINT] = PIPE_FORMAT_Z24_UNORM_S8_UINT,
    [VK_FORMAT_R32G32B32_SFLOAT] = PIPE_FORMAT_R32G32B32_FLOAT,
    [VK_FORMAT_R32G32B32A32_SFLOAT] = PIPE_FORMAT_R32G32B32A32_FLOAT,
 };
 
-static enum pipe_format vkg_to_pipe_format(VkFormat format)
+enum pipe_format vk_format_to_pipe(VkFormat format)
 {
    return format_to_vk_table[format];
 }
@@ -23,7 +25,7 @@ void val_GetPhysicalDeviceFormatProperties(
     VkFormatProperties*                         pFormatProperties)
 {
    VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
-   enum pipe_format pformat = vkg_to_pipe_format(format);
+   enum pipe_format pformat = vk_format_to_pipe(format);
    int features = 0;
    if (pformat == PIPE_FORMAT_NONE) {
      pFormatProperties->linearTilingFeatures = 0;

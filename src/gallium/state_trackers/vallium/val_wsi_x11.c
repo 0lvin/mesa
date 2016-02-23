@@ -502,14 +502,16 @@ x11_queue_present(struct val_swapchain *val_chain,
 
    xcb_void_cookie_t cookie;
 
-   cookie = xcb_copy_area(chain->conn,
-                          image->pixmap,
+   fprintf(stderr, "chain is %p\n", chain);
+   cookie = xcb_put_image(chain->conn, XCB_IMAGE_FORMAT_Z_PIXMAP,
                           chain->window,
                           chain->gc,
-                          0, 0,
-                          0, 0,
                           chain->extent.width,
-                          chain->extent.height);
+                          chain->extent.height,
+                          0, 0, 0, 32,
+                          chain->extent.width * chain->extent.height *4,
+                          image->memory->pmem);
+
    xcb_discard_reply(chain->conn, cookie.sequence);
 
    image->geom_cookie = xcb_get_geometry(chain->conn, chain->window);
@@ -585,10 +587,9 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
       struct val_surface *surface;
       struct val_device_memory *memory;
 
-#if 0
       val_image_create(val_device_to_handle(device),
          &(struct val_image_create_info) {
-            .isl_tiling_flags = ISL_TILING_X_BIT,
+            .bind_flags = 0,
             .stride = 0,
             .vk_info =
          &(VkImageCreateInfo) {
@@ -612,9 +613,9 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
          &image_h);
 
       image = val_image_from_handle(image_h);
-      assert(val_format_is_color(image->format));
+//      assert(val_format_is_color(image->format));
 
-      surface = &image->color_surface;
+//      surface = &image->color_surface;
 
       val_AllocateMemory(val_device_to_handle(device),
          &(VkMemoryAllocateInfo) {
@@ -626,10 +627,13 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
          &memory_h);
 
       memory = val_device_memory_from_handle(memory_h);
-      memory->bo.is_winsys_bo = true;
-#endif
-      val_BindImageMemory(VK_NULL_HANDLE, val_image_to_handle(image),
+//      memory->bo.is_winsys_bo = true;
+      val_BindImageMemory(val_device_to_handle(device), val_image_to_handle(image),
                           memory_h, 0);
+
+      chain->images[i].image = image;
+      chain->images[i].memory = memory;
+      chain->images[i].busy = false;
 
 #if 0
       uint32_t bpp = 32;
@@ -645,11 +649,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
                                              pCreateInfo->imageExtent.height,
                                              surface->isl.row_pitch,
                                              depth, bpp, fd);
-
-      chain->images[i].image = image;
-      chain->images[i].memory = memory;
       chain->images[i].pixmap = pixmap;
-      chain->images[i].busy = false;
 
       xcb_discard_reply(chain->conn, cookie.sequence);
 #endif
