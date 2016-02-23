@@ -17,6 +17,8 @@ static VkResult val_create_cmd_buffer(
    cmd_buffer->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
    cmd_buffer->device = device;
    cmd_buffer->pool = pool;
+
+   list_inithead(&cmd_buffer->cmds);
    if (pool) {
       list_addtail(&cmd_buffer->pool_link, &pool->cmd_buffers);
    } else {
@@ -152,7 +154,17 @@ void val_CmdBeginRenderPass(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    VAL_FROM_HANDLE(val_render_pass, pass, pRenderPassBegin->renderPass);
 //   VAL_FROM_HANDLE(val_framebuffer, framebuffer, pRenderPassBegin->framebuffer);
+   struct val_cmd_buffer_entry *cmd;
 
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_BEGIN_RENDER_PASS;
+
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 
 void val_CmdBindVertexBuffers(
@@ -163,6 +175,21 @@ void val_CmdBindVertexBuffers(
     const VkDeviceSize*                         pOffsets)
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
+
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_BIND_VERTEX_BUFFERS;
+
+   cmd->u.vertex_buffers.first = firstBinding;
+   cmd->u.vertex_buffers.binding_count = bindingCount;
+   cmd->u.vertex_buffers.buffers = (const struct val_buffer *)pBuffers;
+   cmd->u.vertex_buffers.offsets = pOffsets;
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 
 }
 
@@ -174,7 +201,19 @@ void val_CmdBindPipeline(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    VAL_FROM_HANDLE(val_pipeline, pipeline, _pipeline);
+   struct val_cmd_buffer_entry *cmd;
 
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+   cmd->cmd_type = VAL_CMD_BIND_PIPELINE;
+   
+   cmd->u.pipeline.bind_point = pipelineBindPoint;
+   cmd->u.pipeline.pipeline = pipeline;
+
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 
 void val_CmdBindDescriptorSets(
@@ -189,7 +228,24 @@ void val_CmdBindDescriptorSets(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    VAL_FROM_HANDLE(val_pipeline_layout, layout, _layout);
+   struct val_cmd_buffer_entry *cmd;
 
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                   sizeof(*cmd),
+                   8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_BIND_DESCRIPTOR_SETS;
+   cmd->u.descriptor_sets.bind_point = pipelineBindPoint;
+   cmd->u.descriptor_sets.layout = layout;
+   cmd->u.descriptor_sets.first = firstSet;
+   cmd->u.descriptor_sets.count = descriptorSetCount;
+   cmd->u.descriptor_sets.sets = (const struct val_descriptor_set *)pDescriptorSets;
+   cmd->u.descriptor_sets.dynamic_offset_count = dynamicOffsetCount;
+   cmd->u.descriptor_sets.dynamic_offsets = pDynamicOffsets;
+
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);   
 }
 
 void val_CmdDraw(
@@ -200,8 +256,20 @@ void val_CmdDraw(
     uint32_t                                    firstInstance)
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-   //  struct anv_pipeline *pipeline = cmd_buffer->state.pipeline;
+   struct val_cmd_buffer_entry *cmd;
 
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                   sizeof(*cmd),
+                   8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_DRAW;
+   cmd->u.draw.vertex_count = vertexCount;
+   cmd->u.draw.instance_count = instanceCount;
+   cmd->u.draw.first_vertex = firstVertex;
+   cmd->u.draw.first_instance = firstInstance;
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);   
 }
 
 
@@ -209,6 +277,16 @@ void val_CmdEndRenderPass(
     VkCommandBuffer                             commandBuffer)
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
 
-//   anv_cmd_buffer_resolve_subpass(cmd_buffer);
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_END_RENDER_PASS;
+
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
+//   val_cmd_buffer_resolve_subpass(cmd_buffer);
 }

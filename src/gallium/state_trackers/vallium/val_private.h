@@ -379,6 +379,12 @@ struct val_pipeline_layout {
    } stage[MESA_SHADER_STAGES];
 };
 
+struct val_pipeline {
+   struct val_device *                          device;
+   struct val_pipeline_layout *                 layout;
+   VkGraphicsPipelineCreateInfo create_info;
+};
+   
 struct val_buffer {
    struct val_device *                          device;
    VkDeviceSize                                 size;
@@ -392,6 +398,57 @@ struct val_cmd_pool {
    struct list_head                             cmd_buffers;
 };
 
+#define VAL_CMD_BIND_PIPELINE 1
+#define VAL_CMD_BIND_VERTEX_BUFFERS 2
+#define VAL_CMD_BIND_DESCRIPTOR_SETS 3
+#define VAL_CMD_BEGIN_RENDER_PASS 4
+#define VAL_CMD_END_RENDER_PASS 5   
+#define VAL_CMD_DRAW 6
+
+struct val_cmd_bind_pipeline {
+   VkPipelineBindPoint bind_point;
+   struct val_pipeline *pipeline;
+};
+
+struct val_cmd_bind_vertex_buffers {
+   uint32_t first;
+   uint32_t binding_count;
+   const struct val_buffer *buffers;
+   const VkDeviceSize *offsets;
+};
+
+struct val_cmd_bind_descriptor_sets {
+   VkPipelineBindPoint bind_point;
+   struct val_pipeline_layout *layout;
+   uint32_t first;
+   uint32_t count;
+   const struct val_descriptor_set *sets;
+   uint32_t dynamic_offset_count;
+   const uint32_t *dynamic_offsets;
+};
+
+struct val_cmd_begin_render_pass {
+   
+};
+
+struct val_cmd_draw {
+   uint32_t vertex_count;
+   uint32_t instance_count;
+   uint32_t first_vertex;
+   uint32_t first_instance;
+};
+
+struct val_cmd_buffer_entry {
+   struct list_head cmd_link;
+   uint32_t cmd_type;
+   union {
+      struct val_cmd_bind_pipeline pipeline;
+      struct val_cmd_bind_vertex_buffers vertex_buffers;
+      struct val_cmd_bind_descriptor_sets descriptor_sets;
+      struct val_cmd_draw draw;
+   } u;
+};
+      
 struct val_cmd_buffer {
    VK_LOADER_DATA                               _loader_data;
 
@@ -399,6 +456,8 @@ struct val_cmd_buffer {
 
    struct val_cmd_pool *                        pool;
    struct list_head                             pool_link;
+
+   struct list_head                             cmds;
 };
 #ifdef __cplusplus
 }

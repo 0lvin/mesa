@@ -596,7 +596,21 @@ VkResult val_QueueSubmit(
 			 const VkSubmitInfo*                         pSubmits,
 			 VkFence                                     _fence)
 {
-
+   VAL_FROM_HANDLE(val_queue, queue, _queue);
+//   VAL_FROM_HANDLE(val_fence, fence, _fence);
+   struct val_device *device = queue->device;
+   
+   for (uint32_t i = 0; i < submitCount; i++) {
+      for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; j++) {
+         VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer,
+                         pSubmits[i].pCommandBuffers[j]);
+         struct val_cmd_buffer_entry *cmd;
+         LIST_FOR_EACH_ENTRY(cmd, &cmd_buffer->cmds, cmd_link) {
+            fprintf(stderr, "cmd type %d\n", cmd->cmd_type);
+         }
+      }
+   }
+   return VK_SUCCESS;
 }
 
 VkResult val_QueueWaitIdle(
