@@ -160,8 +160,47 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
    state->framebuffer.width = cmd->u.begin_render_pass.framebuffer->width;
    state->framebuffer.height = cmd->u.begin_render_pass.framebuffer->height;
 
+   state->framebuffer.nr_cbufs = 0;
    for (i = 0 ; i < cmd->u.begin_render_pass.framebuffer->attachment_count; i++) {
-      struct val_image_view *img = cmd->u.begin_render_pass.framebuffer->attachments[i];
+      struct val_image_view *imgv = cmd->u.begin_render_pass.framebuffer->attachments[i];
+
+      if (!imgv->surface) {
+         struct pipe_surface template;
+
+         memset(&template, 0, sizeof(struct pipe_surface));
+
+         template.format = 0;
+         template.width = cmd->u.begin_render_pass.framebuffer->width;
+         template.height = cmd->u.begin_render_pass.framebuffer->height;
+         imgv->surface = state->pctx->create_surface(state->pctx,
+                                                     imgv->image->bo, &template);
+      }
+      if (imgv->subresourceRange.aspectMask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+         /* use as ZS buffers */
+         state->framebuffer.zsbuf = imgv->surface;
+      } else if (imgv->subresourceRange.aspectMask & (VK_IMAGE_ASPECT_COLOR_BIT)) {
+         state->framebuffer.cbufs[state->framebuffer.nr_cbufs] = imgv->surface;
+         state->framebuffer.nr_cbufs++;
+      }
+   }
+
+   state->pctx->set_framebuffer_state(state->pctx,
+                                      &state->framebuffer);
+
+   if (cmd->u.begin_render_pass.render_pass->attachment_count) {
+      if (cmd->u.begin_render_pass.render_pass->attachments[0].load_op == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+         union pipe_color_union color;
+         const VkClearValue value = cmd->u.begin_render_pass.clear_values[0];
+         double dclear_val = value.depthStencil.depth;
+         uint32_t sclear_val = value.depthStencil.stencil;
+         color.ui[0] = value.color.uint32[0];
+         color.ui[1] = value.color.uint32[1];
+         color.ui[2] = value.color.uint32[2];
+         color.ui[3] = value.color.uint32[3];
+         state->pctx->clear(state->pctx,
+                            PIPE_CLEAR_COLOR,
+                            &color, dclear_val, sclear_val);
+      }
    }
    return VK_SUCCESS;
 }

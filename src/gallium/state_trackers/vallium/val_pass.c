@@ -34,7 +34,7 @@ VkResult val_CreateRenderPass(
    for (uint32_t i = 0; i < pCreateInfo->attachmentCount; i++) {
       struct val_render_pass_attachment *att = &pass->attachments[i];
 
-//      att->format = val_format_for_vk_format(pCreateInfo->pAttachments[i].format);
+      att->format = pCreateInfo->pAttachments[i].format;
       att->samples = pCreateInfo->pAttachments[i].samples;
       att->load_op = pCreateInfo->pAttachments[i].loadOp;
       att->stencil_load_op = pCreateInfo->pAttachments[i].stencilLoadOp;

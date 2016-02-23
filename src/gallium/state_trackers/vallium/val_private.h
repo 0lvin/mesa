@@ -276,6 +276,7 @@ struct val_device_memory {
 struct val_image {
    VkImageType type;
    VkFormat vk_format;
+   struct pipe_resource *bo;
 };
 
 struct val_image_view {
@@ -285,6 +286,8 @@ struct val_image_view {
    VkFormat format;
    VkComponentMapping components;
    VkImageSubresourceRange subresourceRange;
+
+   struct pipe_surface *surface; /* have we created a pipe surface for this? */
 };
 
 struct val_subpass {
@@ -300,6 +303,7 @@ struct val_subpass {
 };
    
 struct val_render_pass_attachment {
+   VkFormat                                     format;
    uint32_t                                     samples;
    VkAttachmentLoadOp                           load_op;
    VkAttachmentLoadOp                           stencil_load_op;
