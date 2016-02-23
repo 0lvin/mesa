@@ -508,7 +508,7 @@ x11_queue_present(struct val_swapchain *val_chain,
                           chain->gc,
                           chain->extent.width,
                           chain->extent.height,
-                          0, 0, 0, 32,
+                          0, 0, 0, 24,
                           chain->extent.width * chain->extent.height *4,
                           image->memory->pmem);
 
