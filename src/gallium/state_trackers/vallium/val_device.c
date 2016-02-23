@@ -248,9 +248,8 @@ val_device_get_cache_uuid(void *uuid)
    snprintf(uuid, VK_UUID_SIZE, "anv-%s", MESA_GIT_SHA1 + 4);
 }
 
-void val_GetPhysicalDeviceProperties(
-				     VkPhysicalDevice                            physicalDevice,
-				     VkPhysicalDeviceProperties*                 pProperties)
+void val_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
+				     VkPhysicalDeviceProperties *pProperties)
 {
    VAL_FROM_HANDLE(val_physical_device, pdevice, physicalDevice);
 
@@ -379,7 +378,7 @@ void val_GetPhysicalDeviceProperties(
       .sparseProperties = {0}, /* Broadwell doesn't do sparse. */
    };
 
-   strcpy(pProperties->deviceName, "swrast");
+   strcpy(pProperties->deviceName, pdevice->pscreen->get_name(pdevice->pscreen));
    val_device_get_cache_uuid(pProperties->pipelineCacheUUID);
 
 }
@@ -495,9 +494,9 @@ VkResult val_CreateDevice(
       device->alloc = physical_device->instance->alloc;
 
    val_queue_init(device, &device->queue);
-
-   device->screen = physical_device->pscreen;
-
+   
+   device->pscreen = physical_device->pscreen;
+   
    *pDevice = val_device_to_handle(device);
 
    return VK_SUCCESS;
@@ -586,6 +585,8 @@ void val_GetDeviceQueue(
    VAL_FROM_HANDLE(val_device, device, _device);
 
    assert(queueIndex == 0);
+
+   *pQueue = val_queue_to_handle(&device->queue);
 }
 
 
@@ -616,7 +617,32 @@ VkResult val_AllocateMemory(
 			    const VkAllocationCallbacks*                pAllocator,
 			    VkDeviceMemory*                             pMem)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   struct val_device_memory *mem;
+   assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
 
+   if (pAllocateInfo->allocationSize == 0) {
+      /* Apparently, this is allowed */
+      *pMem = VK_NULL_HANDLE;
+      return VK_SUCCESS;
+   }
+   
+   mem = val_alloc2(&device->alloc, pAllocator, sizeof(*mem), 8,
+                    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (mem == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   mem->pmem = device->pscreen->allocate_memory(device->pscreen, pAllocateInfo->allocationSize);
+   if (!mem->pmem) {
+      val_free2(&device->alloc, pAllocator, mem);
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+   }
+
+   mem->type_index = pAllocateInfo->memoryTypeIndex;
+
+   *pMem = val_device_memory_to_handle(mem);
+
+   return VK_SUCCESS;
 }
 
 void val_FreeMemory(
@@ -624,7 +650,17 @@ void val_FreeMemory(
 		    VkDeviceMemory                              _mem,
 		    const VkAllocationCallbacks*                pAllocator)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_device_memory, mem, _mem);
 
+   if (mem == NULL)
+      return;
+
+//   if (mem->bo.map)
+//      val_gem_munmap(mem->bo.map, mem->bo.size);
+
+   device->pscreen->free_memory(device->pscreen, mem->pmem);
+   val_free2(&device->alloc, pAllocator, mem);
 
 }
 
@@ -636,14 +672,31 @@ VkResult val_MapMemory(
 		       VkMemoryMapFlags                            flags,
 		       void**                                      ppData)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+   void *map;
+   if (mem == NULL) {
+      *ppData = NULL;
+      return VK_SUCCESS;
+   }
 
+   map = device->pscreen->map_memory(device->pscreen, mem->pmem);
+   
+   *ppData = map + offset;
+   return VK_SUCCESS;
 }
 
 void val_UnmapMemory(
 		     VkDevice                                    _device,
 		     VkDeviceMemory                              _memory)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 
+   if (mem == NULL)
+      return;
+
+   device->pscreen->unmap_memory(device->pscreen, mem->pmem);
 }
 
 VkResult val_FlushMappedMemoryRanges(
@@ -795,4 +848,16 @@ void val_DestroyFramebuffer(
     VkFramebuffer                               _fb,
     const VkAllocationCallbacks*                pAllocator)
 {
+}
+
+VkResult val_WaitForFences(
+    VkDevice                                    _device,
+    uint32_t                                    fenceCount,
+    const VkFence*                              pFences,
+    VkBool32                                    waitAll,
+    uint64_t                                    timeout)
+{
+   VAL_FROM_HANDLE(val_device, device, _device);
+
+   return VK_SUCCESS;
 }

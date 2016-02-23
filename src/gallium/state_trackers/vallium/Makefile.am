@@ -17,8 +17,12 @@ AM_CPPFLAGS = \
 
 VALLIUM_SOURCES = \
 	val_device.c \
+	val_cmd_buffer.c \
+	val_descriptor_set.c \
 	val_util.c \
+	val_image.c \
 	val_formats.c \
+	val_pass.c \
 	val_pipeline.c \
 	val_wsi.c \
 	val_wsi_x11.c

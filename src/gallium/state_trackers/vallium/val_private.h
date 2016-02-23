@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <strings.h>
 #include <pthread.h>
 #include <assert.h>
 #include <stdint.h>
@@ -10,6 +11,7 @@
 #include "util/macros.h"
 #include "util/list.h"
 
+#include "compiler/shader_enums.h"
 #include "pipe/p_screen.h"
 
 /* Pre-declarations needed for WSI entrypoints */
@@ -46,6 +48,8 @@ extern "C" {
 #define val_noreturn __attribute__((__noreturn__))
 #define val_printflike(a, b) __attribute__((__format__(__printf__, a, b)))
 
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
    //   static_assert(sizeof(*src) == sizeof(*dest), "");
 
 #define typed_memcpy(dest, src, count) ({ \
@@ -86,14 +90,25 @@ void *val_lookup_entrypoint(const char *name);
 #define VAL_FROM_HANDLE(__val_type, __name, __handle) \
    struct __val_type *__name = __val_type ## _from_handle(__handle)
 
+VAL_DEFINE_HANDLE_CASTS(val_cmd_buffer, VkCommandBuffer)
 VAL_DEFINE_HANDLE_CASTS(val_device, VkDevice)
 VAL_DEFINE_HANDLE_CASTS(val_instance, VkInstance)
 VAL_DEFINE_HANDLE_CASTS(val_physical_device, VkPhysicalDevice)
 VAL_DEFINE_HANDLE_CASTS(val_queue, VkQueue)
 
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_cmd_pool, VkCommandPool)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_buffer, VkBuffer)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set, VkDescriptorSet)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set_layout, VkDescriptorSetLayout)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_device_memory, VkDeviceMemory)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_image, VkImage)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_image_view, VkImageView);
-
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_pipeline_cache, VkPipelineCache)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_pipeline, VkPipeline)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_pipeline_layout, VkPipelineLayout)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_render_pass, VkRenderPass)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_sampler, VkSampler)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_shader_module, VkShaderModule)
 extern struct val_dispatch_table dtable;
 
 #define ICD_EXPORT PUBLIC
@@ -176,6 +191,32 @@ val_free2(const VkAllocationCallbacks *parent_alloc,
       val_free(parent_alloc, data);
 }
 
+struct val_shader_module {
+   uint32_t                                     size;
+
+};
+
+static inline gl_shader_stage
+vk_to_mesa_shader_stage(VkShaderStageFlagBits vk_stage)
+{
+   assert(__builtin_popcount(vk_stage) == 1);
+   return ffs(vk_stage) - 1;
+}
+
+static inline VkShaderStageFlagBits
+mesa_to_vk_shader_stage(gl_shader_stage mesa_stage)
+{
+   return (1 << mesa_stage);
+}
+
+#define VAL_STAGE_MASK ((1 << MESA_SHADER_STAGES) - 1)
+
+#define val_foreach_stage(stage, stage_bits)                         \
+   for (gl_shader_stage stage,                                       \
+        __tmp = (gl_shader_stage)((stage_bits) & VAL_STAGE_MASK);    \
+        stage = __builtin_ffs(__tmp) - 1, __tmp;                     \
+        __tmp &= ~(1 << (stage)))
+   
 struct val_physical_device {
     VK_LOADER_DATA                              _loader_data;
     struct val_instance *                       instance;
@@ -219,10 +260,17 @@ struct val_device {
    struct val_queue queue;
    struct val_instance *                       instance;
    struct val_physical_device *physical_device;
-   struct pipe_screen *screen;
+   struct pipe_screen *pscreen;
 };
 
 void val_device_get_cache_uuid(void *uuid);
+
+struct val_device_memory {
+   struct pipe_memory_allocation *pmem;
+   uint32_t                                     type_index;
+   VkDeviceSize                                 map_size;
+   void *                                       map;
+};
 
 struct val_image {
    VkImageType type;
@@ -234,6 +282,124 @@ struct val_image_view {
 
 };
 
+struct val_subpass {
+   uint32_t                                     input_count;
+   uint32_t *                                   input_attachments;
+   uint32_t                                     color_count;
+   uint32_t *                                   color_attachments;
+   uint32_t *                                   resolve_attachments;
+   uint32_t                                     depth_stencil_attachment;
+
+   /** Subpass has at least one resolve attachment */
+   bool                                         has_resolve;
+};
+   
+struct val_render_pass_attachment {
+   uint32_t                                     samples;
+   VkAttachmentLoadOp                           load_op;
+   VkAttachmentLoadOp                           stencil_load_op;
+};
+
+struct val_render_pass {
+   uint32_t                                     attachment_count;
+   uint32_t                                     subpass_count;
+   uint32_t *                                   subpass_attachments;
+   struct val_render_pass_attachment *          attachments;
+   struct val_subpass                           subpasses[0];
+};
+
+struct val_sampler {
+   uint32_t state[4];
+};
+
+struct val_descriptor_set_binding_layout {
+   /* Number of array elements in this binding */
+   uint16_t array_size;
+
+   /* Index into the flattend descriptor set */
+   uint16_t descriptor_index;
+
+   /* Index into the dynamic state array for a dynamic buffer */
+   int16_t dynamic_offset_index;
+
+   /* Index into the descriptor set buffer views */
+   int16_t buffer_index;
+
+   struct {
+      /* Index into the binding table for the associated surface */
+      int16_t surface_index;
+
+      /* Index into the sampler table for the associated sampler */
+      int16_t sampler_index;
+
+      /* Index into the image table for the associated image */
+      int16_t image_index;
+   } stage[MESA_SHADER_STAGES];
+
+   /* Immutable samplers (or NULL if no immutable samplers) */
+   struct val_sampler **immutable_samplers;
+};
+
+struct val_descriptor_set_layout {
+   /* Number of bindings in this descriptor set */
+   uint16_t binding_count;
+
+   /* Total size of the descriptor set with room for all array entries */
+   uint16_t size;
+
+   /* Shader stages affected by this descriptor set */
+   uint16_t shader_stages;
+
+   /* Number of buffers in this descriptor set */
+   uint16_t buffer_count;
+
+   /* Number of dynamic offsets used by this descriptor set */
+   uint16_t dynamic_offset_count;
+
+   /* Bindings in this descriptor set */
+   struct val_descriptor_set_binding_layout binding[0];
+};
+   
+struct val_descriptor_set {
+   const struct val_descriptor_set_layout *layout;
+   uint32_t buffer_count;
+
+};
+
+struct val_pipeline_layout {
+   struct {
+      struct val_descriptor_set_layout *layout;
+      uint32_t dynamic_offset_start;
+   } set[MAX_SETS];
+
+   uint32_t num_sets;
+
+   struct {
+      bool has_dynamic_offsets;
+   } stage[MESA_SHADER_STAGES];
+};
+
+struct val_buffer {
+   struct val_device *                          device;
+   VkDeviceSize                                 size;
+
+   VkBufferUsageFlags                           usage;
+   VkDeviceSize                                 offset;
+};
+   
+struct val_cmd_pool {
+   VkAllocationCallbacks                        alloc;
+   struct list_head                             cmd_buffers;
+};
+
+struct val_cmd_buffer {
+   VK_LOADER_DATA                               _loader_data;
+
+   struct val_device *                          device;
+
+   struct val_cmd_pool *                        pool;
+   struct list_head                             pool_link;
+};
 #ifdef __cplusplus
 }
 #endif
