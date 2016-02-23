@@ -66,6 +66,10 @@ struct softpipe_resource
    boolean userBuffer;
 
    unsigned timestamp;
+   uint64_t size_required;
+   boolean backable;
+   boolean backed;
+   uint64_t backing_offset;
 };
 
 

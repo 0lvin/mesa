@@ -97,6 +97,7 @@ softpipe_resource_layout(struct pipe_screen *screen,
    if (buffer_size > SP_MAX_TEXTURE_SIZE)
       return FALSE;
 
+   spr->size_required = buffer_size;
    if (allocate) {
       spr->data = align_malloc(buffer_size, 64);
       return spr->data != NULL;
@@ -151,9 +152,10 @@ softpipe_displaytarget_layout(struct pipe_screen *screen,
  * Create new pipe_resource given the template information.
  */
 static struct pipe_resource *
-softpipe_resource_create_front(struct pipe_screen *screen,
-                               const struct pipe_resource *templat,
-                               const void *map_front_private)
+softpipe_resource_create_all(struct pipe_screen *screen,
+			     const struct pipe_resource *templat,
+			     const void *map_front_private,
+			     bool alloc_backing)
 {
    struct softpipe_resource *spr = CALLOC_STRUCT(softpipe_resource);
    if (!spr)
@@ -176,7 +178,7 @@ softpipe_resource_create_front(struct pipe_screen *screen,
          goto fail;
    }
    else {
-      if (!softpipe_resource_layout(screen, spr, TRUE))
+      if (!softpipe_resource_layout(screen, spr, alloc_backing))
          goto fail;
    }
     
@@ -188,10 +190,35 @@ softpipe_resource_create_front(struct pipe_screen *screen,
 }
 
 static struct pipe_resource *
+softpipe_resource_create_front(struct pipe_screen *screen,
+                               const struct pipe_resource *templat,
+                               const void *map_front_private)
+{
+  return softpipe_resource_create_all(screen, templat, map_front_private, true);
+}
+
+static struct pipe_resource *
 softpipe_resource_create(struct pipe_screen *screen,
                          const struct pipe_resource *templat)
 {
-   return softpipe_resource_create_front(screen, templat, NULL);
+  return softpipe_resource_create_all(screen, templat, NULL, true);
+}
+
+static struct pipe_resource *
+softpipe_resource_create_unbacked(struct pipe_screen *screen,
+				  const struct pipe_resource *templat,
+                                  uint64_t *size_required)
+{
+   struct pipe_resource *pt;
+   struct softpipe_resource *spr;
+   pt = softpipe_resource_create_all(screen, templat, NULL, false);
+   if (!pt)
+      return pt;
+   spr = softpipe_resource(pt);
+   spr->backable = true;
+   spr->backed = false;
+   *size_required = spr->size_required;
+   return pt;
 }
 
 static void
@@ -520,6 +547,59 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->surface_destroy = softpipe_surface_destroy;
 }
 
+static struct pipe_memory_allocation *softpipe_allocate_memory(struct pipe_screen *screen, uint64_t size)
+{
+   void *mem = malloc(size);
+   return mem;
+}
+
+static void softpipe_free_memory(struct pipe_screen *screen,
+                                 struct pipe_memory_allocation *pmem)
+{
+   free(pmem);
+}
+
+static void softpipe_resource_allocate_backing(struct pipe_screen *screen,
+                                               struct pipe_resource *pt,
+                                               struct pipe_memory_allocation *pmem,
+                                               uint64_t offset)
+{
+   struct softpipe_resource *spr = softpipe_resource(pt);
+
+   if (!spr->backable)
+      return;
+
+   spr->data = (char *)pmem + offset;
+   spr->backed = true;
+   spr->backing_offset = offset;
+}
+
+static void softpipe_resource_remove_backing(struct pipe_screen *screen,
+                                             struct pipe_resource *pt)
+{
+   struct softpipe_resource *spr = softpipe_resource(pt);
+
+   if (!spr->backable)
+      return;
+
+   if (!spr->backed)
+      return;
+
+   spr->backed = false;
+   spr->data = NULL;
+   spr->backing_offset = 0;
+}
+
+static void *softpipe_map_memory(struct pipe_screen *screen,
+                                 struct pipe_memory_allocation *pmem)
+{
+   return pmem;
+}
+
+static void softpipe_unmap_memory(struct pipe_screen *screen,
+                                  struct pipe_memory_allocation *pmem)
+{
+}
 
 void
 softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
@@ -530,4 +610,14 @@ softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
    screen->resource_from_handle = softpipe_resource_from_handle;
    screen->resource_get_handle = softpipe_resource_get_handle;
    screen->can_create_resource = softpipe_can_create_resource;
+   screen->resource_create_unbacked = softpipe_resource_create_unbacked;
+
+   screen->allocate_memory = softpipe_allocate_memory;
+   screen->free_memory = softpipe_free_memory;
+   screen->map_memory = softpipe_map_memory;
+   screen->unmap_memory = softpipe_unmap_memory;
+
+   screen->resource_allocate_backing = softpipe_resource_allocate_backing;
+   screen->resource_remove_backing = softpipe_resource_remove_backing;
+
 }
