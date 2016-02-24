@@ -6,6 +6,9 @@
 #include "pipe/p_state.h"
 #include "val_conv.h"
 
+#include "val_tgsi_hack.h"
+#include "pipe/p_shader_tokens.h"
+#include "tgsi/tgsi_text.h"
 struct rendering_state {
    struct pipe_context *pctx;
 
@@ -96,11 +99,60 @@ static VkResult emit_state(struct rendering_state *state)
    return VK_SUCCESS;
 }
 
+static void *parse_fragment_shader(struct pipe_context *pctx,
+                                  const char *text)
+{
+   struct tgsi_token tokens[1024];
+   struct pipe_shader_state state;
+
+   if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens)))
+      return NULL;
+
+   memset(&state, 0, sizeof(state));
+   state.tokens = tokens;
+   return pctx->create_fs_state(pctx, &state);
+}
+
+static void *parse_vertex_shader(struct pipe_context *pctx,
+                                  const char *text)
+{
+   struct tgsi_token tokens[1024];
+   struct pipe_shader_state state;
+
+   if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens)))
+      return NULL;
+
+   memset(&state, 0, sizeof(state));
+   state.tokens = tokens;
+   return pctx->create_vs_state(pctx, &state);
+}
+
+
 static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
                                 struct rendering_state *state)
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
-   
+
+   {
+      int i;
+      for (i = 0; i < pipeline->create_info.stageCount; i++) {
+         const VkPipelineShaderStageCreateInfo *sh = &pipeline->create_info.pStages[i];
+         void *shader;
+         switch (sh->stage) {
+         case VK_SHADER_STAGE_FRAGMENT_BIT:
+            shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
+            state->pctx->bind_fs_state(state->pctx, shader);
+            break;
+         case VK_SHADER_STAGE_VERTEX_BIT:
+            shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
+            state->pctx->bind_vs_state(state->pctx, shader);
+            break;
+         default:
+            assert(0);
+            break;
+         }
+      }
+   }
    /* rasterization state */
    if (pipeline->create_info.pRasterizationState) {
       const VkPipelineRasterizationStateCreateInfo *rsc = pipeline->create_info.pRasterizationState;
