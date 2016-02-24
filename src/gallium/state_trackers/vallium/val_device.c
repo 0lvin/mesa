@@ -659,7 +659,7 @@ VkResult val_QueueSubmit(
 VkResult val_QueueWaitIdle(
 			   VkQueue                                     _queue)
 {
-
+   return VK_SUCCESS;
 }
 
 VkResult val_DeviceWaitIdle(
@@ -1015,4 +1015,26 @@ VkResult val_WaitForFences(
    VAL_FROM_HANDLE(val_device, device, _device);
 
    return VK_SUCCESS;
+}
+
+VkResult val_CreateSemaphore(
+    VkDevice                                    device,
+    const VkSemaphoreCreateInfo*                pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkSemaphore*                                pSemaphore)
+{
+   /* The DRM execbuffer ioctl always execute in-oder, even between different
+    * rings. As such, there's nothing to do for the user space semaphore.
+    */
+
+   *pSemaphore = (VkSemaphore)1;
+
+   return VK_SUCCESS;
+}
+
+void val_DestroySemaphore(
+    VkDevice                                    device,
+    VkSemaphore                                 semaphore,
+    const VkAllocationCallbacks*                pAllocator)
+{
 }

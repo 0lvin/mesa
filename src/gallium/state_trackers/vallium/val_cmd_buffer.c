@@ -96,7 +96,7 @@ VkResult val_BeginCommandBuffer(
 VkResult val_EndCommandBuffer(
     VkCommandBuffer                             commandBuffer)
 {
-
+   return VK_SUCCESS;
 }
 
 VkResult val_CreateCommandPool(
@@ -315,4 +315,75 @@ void val_CmdEndRenderPass(
 
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 //   val_cmd_buffer_resolve_subpass(cmd_buffer);
+}
+
+void val_CmdSetViewport(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    firstViewport,
+    uint32_t                                    viewportCount,
+    const VkViewport*                           pViewports)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+
+
+}
+
+void val_CmdSetScissor(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    firstScissor,
+    uint32_t                                    scissorCount,
+    const VkRect2D*                             pScissors)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+
+}
+
+void val_CmdSetLineWidth(
+    VkCommandBuffer                             commandBuffer,
+    float                                       lineWidth)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+
+}
+
+void val_CmdSetDepthBias(
+    VkCommandBuffer                             commandBuffer,
+    float                                       depthBiasConstantFactor,
+    float                                       depthBiasClamp,
+    float                                       depthBiasSlopeFactor)
+{
+}
+
+void val_CmdSetBlendConstants(
+    VkCommandBuffer                             commandBuffer,
+    const float                                 blendConstants[4])
+{
+}
+
+void val_CmdSetDepthBounds(
+    VkCommandBuffer                             commandBuffer,
+    float                                       minDepthBounds,
+    float                                       maxDepthBounds)
+{
+}
+
+void val_CmdSetStencilCompareMask(
+    VkCommandBuffer                             commandBuffer,
+    VkStencilFaceFlags                          faceMask,
+    uint32_t                                    compareMask)
+{
+}
+void val_CmdSetStencilWriteMask(
+    VkCommandBuffer                             commandBuffer,
+    VkStencilFaceFlags                          faceMask,
+    uint32_t                                    writeMask)
+{
+}
+
+
+void val_CmdSetStencilReference(
+    VkCommandBuffer                             commandBuffer,
+    VkStencilFaceFlags                          faceMask,
+    uint32_t                                    reference)
+{
 }

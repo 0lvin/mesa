@@ -102,3 +102,23 @@ val_DestroyImageView(VkDevice _device, VkImageView _iview,
 
    val_free2(&device->alloc, pAllocator, iview);
 }
+
+void val_GetImageSubresourceLayout(
+    VkDevice                                    device,
+    VkImage                                     _image,
+    const VkImageSubresource*                   pSubresource,
+    VkSubresourceLayout*                        pLayout)
+{
+   VAL_FROM_HANDLE(val_image, image, _image);
+
+   switch (pSubresource->aspectMask) {
+   case VK_IMAGE_ASPECT_COLOR_BIT:
+      break;
+   case VK_IMAGE_ASPECT_DEPTH_BIT:
+      break;
+   case VK_IMAGE_ASPECT_STENCIL_BIT:
+      break;
+   default:
+      assert(!"Invalid image aspect");
+   }
+}

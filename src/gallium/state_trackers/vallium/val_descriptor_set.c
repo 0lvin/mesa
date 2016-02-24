@@ -436,3 +436,31 @@ void val_UpdateDescriptorSets(
          dst_desc[j] = src_desc[j];
    }
 }
+
+VkResult val_CreateDescriptorPool(
+    VkDevice                                    device,
+    const VkDescriptorPoolCreateInfo*           pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkDescriptorPool*                           pDescriptorPool)
+{
+   val_finishme("VkDescriptorPool is a stub");
+   *pDescriptorPool = (VkDescriptorPool)1;
+   return VK_SUCCESS;
+}
+
+void val_DestroyDescriptorPool(
+    VkDevice                                    _device,
+    VkDescriptorPool                            _pool,
+    const VkAllocationCallbacks*                pAllocator)
+{
+   val_finishme("VkDescriptorPool is a stub: free the pool's descriptor sets");
+}
+
+VkResult val_ResetDescriptorPool(
+    VkDevice                                    device,
+    VkDescriptorPool                            descriptorPool,
+    VkDescriptorPoolResetFlags                  flags)
+{
+   val_finishme("VkDescriptorPool is a stub: free the pool's descriptor sets");
+   return VK_SUCCESS;
+}
