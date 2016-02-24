@@ -106,17 +106,22 @@ deep_copy_viewport_state(VkPipelineViewportStateCreateInfo *dst,
 
    dst->flags = src->flags;
 
-   viewports = malloc(src->viewportCount * sizeof(VkViewport));
-   for (i = 0; i < src->viewportCount; i++)
-      memcpy(&viewports[i], &src->pViewports[i], sizeof(VkViewport));
+   if (src->pViewports) {
+      viewports = malloc(src->viewportCount * sizeof(VkViewport));
+      for (i = 0; i < src->viewportCount; i++)
+         memcpy(&viewports[i], &src->pViewports[i], sizeof(VkViewport));
+      dst->pViewports = viewports;
+   }
    dst->viewportCount = src->viewportCount;
-   dst->pViewports = viewports;
 
-   scissors = malloc(src->scissorCount * sizeof(VkRect2D));
-   for (i = 0; i < src->scissorCount; i++)
-      memcpy(&scissors[i], &src->pScissors[i], sizeof(VkRect2D));
+   if (src->pScissors) {
+      scissors = malloc(src->scissorCount * sizeof(VkRect2D));
+      for (i = 0; i < src->scissorCount; i++)
+         memcpy(&scissors[i], &src->pScissors[i], sizeof(VkRect2D));
+      dst->pScissors = scissors;
+   }
    dst->scissorCount = src->scissorCount;
-   dst->pScissors = scissors;
+
    return VK_SUCCESS;
 }
 
@@ -155,6 +160,7 @@ deep_copy_dynamic_state(VkPipelineDynamicStateCreateInfo *dst,
       return VK_ERROR_OUT_OF_HOST_MEMORY;
 
    memcpy(dynamic_states, src->pDynamicStates, src->dynamicStateCount * sizeof(VkDynamicState));
+   dst->dynamicStateCount = src->dynamicStateCount;
    dst->pDynamicStates = dynamic_states;
    return VK_SUCCESS;
 }

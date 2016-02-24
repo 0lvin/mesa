@@ -150,6 +150,18 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
                                 struct rendering_state *state)
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
+   bool dynamic_state_viewport = false, dynamic_state_scissor = false;
+
+   {
+      const VkPipelineDynamicStateCreateInfo *dyn = pipeline->create_info.pDynamicState;
+      int i;
+      for (i = 0; i < dyn->dynamicStateCount; i++) {
+         if (dyn->pDynamicStates[i] == VK_DYNAMIC_STATE_VIEWPORT)
+            dynamic_state_viewport = true;
+         else if (dyn->pDynamicStates[i] == VK_DYNAMIC_STATE_SCISSOR)
+            dynamic_state_scissor = true;
+      }
+   }
 
    {
       int i;
@@ -257,16 +269,19 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    if (pipeline->create_info.pViewportState) {
       const VkPipelineViewportStateCreateInfo *vpi= pipeline->create_info.pViewportState;
       int i;
-      for (i = 0; i < vpi->viewportCount; i++) {
-         const VkViewport *vp = &vpi->pViewports[i];
-         state->viewports[i].scale[0] = vp->width / 2;
-         state->viewports[i].scale[1] = vp->height / 2;
-         state->viewports[i].scale[2] = 1.0;
-         state->viewports[i].translate[0] = vp->x + vp->width / 2;
-         state->viewports[i].translate[1] = vp->y + vp->height / 2;
-         state->viewports[i].translate[2] = 0.0;
+
+      if (!dynamic_state_viewport) {
+         for (i = 0; i < vpi->viewportCount; i++) {
+            const VkViewport *vp = &vpi->pViewports[i];
+            state->viewports[i].scale[0] = vp->width / 2;
+            state->viewports[i].scale[1] = vp->height / 2;
+            state->viewports[i].scale[2] = 1.0;
+            state->viewports[i].translate[0] = vp->x + vp->width / 2;
+            state->viewports[i].translate[1] = vp->y + vp->height / 2;
+            state->viewports[i].translate[2] = 0.0;
+         }
+         state->vp_dirty = true;
       }
-      state->vp_dirty = true;
    }
    return VK_SUCCESS;
 }
