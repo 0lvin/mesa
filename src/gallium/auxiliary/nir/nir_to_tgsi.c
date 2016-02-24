@@ -21,7 +21,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "glsl/nir/nir.h"
+#include "compiler/nir/nir.h"
 #include "tgsi/tgsi_ureg.h"
 #include "nir/nir_to_tgsi.h"
 
@@ -95,7 +95,7 @@ ntt_setup_inputs(struct ntt_compile *c)
                                                 semantic_index,
                                                 interpolation,
                                                 0,
-                                                sample_loc);
+                                                sample_loc, 0, 1);
 
          /* XXX: fs coord origin */
       } else {
@@ -276,7 +276,7 @@ ntt_emit_alu(struct ntt_compile *c, nir_alu_instr *instr)
    dst = ntt_get_dst(c, instr->dest.dest);
 
    if (instr->dest.saturate)
-      dst.Saturate = TGSI_SAT_ZERO_ONE;
+      dst.Saturate = 1;
 
    dst.WriteMask = instr->dest.write_mask;
 
@@ -629,7 +629,7 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       struct hash_entry *entry = _mesa_hash_table_search(c->def_ht,
                                                          instr->dest.reg.reg);
       dst = ((struct ureg_dst *) entry->data);
-      only_def = instr->dest.reg.reg->defs->entries == 1;
+//TODO      only_def = instr->dest.reg.reg->defs->entries == 1;
    }
 
    switch (instr->intrinsic) {
@@ -646,6 +646,7 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       }
    }
       break;
+#if 0
    case nir_intrinsic_load_uniform_indirect: {
       uint32_t index = instr->const_index[0];
 
@@ -661,7 +662,7 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
                                  ureg_src(c->addr_reg)));
    }
       break;
-
+#endif
    case nir_intrinsic_load_input: {
       uint32_t index = instr->const_index[0];
       struct ureg_src src = ureg_src_register(TGSI_FILE_INPUT,
@@ -1038,9 +1039,11 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    struct ntt_compile *c;
    const void *tgsi_tokens;
 
-   nir_convert_from_ssa(s);
+   nir_print_shader(s, stdout);
+   nir_convert_from_ssa(s, false);
    nir_lower_vec_to_movs(s);
 
+   nir_print_shader(s, stdout);
    c = rzalloc(NULL, struct ntt_compile);
 
    c->s = s;
@@ -1057,10 +1060,10 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    ntt_setup_registers(c, &c->s->registers);
 
    /* Find the main function and emit the body. */
-   nir_foreach_overload(c->s, overload) {
-      assert(strcmp(overload->function->name, "main") == 0);
-      assert(overload->impl);
-      ntt_emit_impl(c, overload->impl);
+   nir_foreach_function(c->s, function) {
+      assert(strcmp(function->name, "main") == 0);
+      assert(function->impl);
+      ntt_emit_impl(c, function->impl);
       ureg_END(c->ureg);
    }
 
