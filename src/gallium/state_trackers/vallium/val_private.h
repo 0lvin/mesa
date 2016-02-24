@@ -278,6 +278,7 @@ struct val_image {
    VkImageType type;
    VkFormat vk_format;
    VkDeviceSize size;
+   uint32_t alignment;
    struct pipe_resource *bo;
 };
 

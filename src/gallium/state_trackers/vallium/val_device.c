@@ -439,7 +439,22 @@ void val_GetPhysicalDeviceMemoryProperties(
 					   VkPhysicalDevice                            physicalDevice,
 					   VkPhysicalDeviceMemoryProperties*           pMemoryProperties)
 {
+   VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
 
+   pMemoryProperties->memoryTypeCount = 1;
+   pMemoryProperties->memoryTypes[0] = (VkMemoryType) {
+      .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+      VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+      .heapIndex = 0,
+   };
+
+   pMemoryProperties->memoryHeapCount = 1;
+   pMemoryProperties->memoryHeaps[0] = (VkMemoryHeap) {
+      .size = 1024*1024*1024,
+      .flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
+   };
 }
 
 PFN_vkVoidFunction val_GetInstanceProcAddr(
@@ -761,7 +776,21 @@ void val_GetBufferMemoryRequirements(
 				     VkBuffer                                    _buffer,
 				     VkMemoryRequirements*                       pMemoryRequirements)
 {
+   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
+   /* The Vulkan spec (git aaed022) says:
+    *
+    *    memoryTypeBits is a bitfield and contains one bit set for every
+    *    supported memory type for the resource. The bit `1<<i` is set if and
+    *    only if the memory type `i` in the VkPhysicalDeviceMemoryProperties
+    *    structure for the physical device is supported.
+    *
+    * We support exactly one memory type.
+    */
+   pMemoryRequirements->memoryTypeBits = 1;
+
+   pMemoryRequirements->size = buffer->size;
+   pMemoryRequirements->alignment = 16;
 }
 
 void val_GetImageMemoryRequirements(
@@ -769,7 +798,11 @@ void val_GetImageMemoryRequirements(
 				    VkImage                                     _image,
 				    VkMemoryRequirements*                       pMemoryRequirements)
 {
+   VAL_FROM_HANDLE(val_image, image, _image);
+   pMemoryRequirements->memoryTypeBits = 1;
 
+   pMemoryRequirements->size = image->size;
+   pMemoryRequirements->alignment = image->alignment;
 }
 
 void val_GetImageSparseMemoryRequirements(
