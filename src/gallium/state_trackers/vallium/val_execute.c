@@ -152,6 +152,7 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
    bool dynamic_state_viewport = false, dynamic_state_scissor = false;
 
+   if (pipeline->create_info.pDynamicState)
    {
       const VkPipelineDynamicStateCreateInfo *dyn = pipeline->create_info.pDynamicState;
       int i;
