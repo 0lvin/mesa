@@ -37,3 +37,24 @@ static inline unsigned vk_conv_stencil_op(uint32_t vk_stencil_op)
       return 0;
    }
 }
+
+static inline unsigned vk_conv_topology(VkPrimitiveTopology topology)
+{
+   switch (topology) {
+   case VK_PRIMITIVE_TOPOLOGY_POINT_LIST:
+      return PIPE_PRIM_POINTS;
+   case VK_PRIMITIVE_TOPOLOGY_LINE_LIST:
+      return PIPE_PRIM_LINES;
+   case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+      return PIPE_PRIM_LINE_STRIP;
+   case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:
+      return PIPE_PRIM_TRIANGLES;
+   case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+      return PIPE_PRIM_TRIANGLE_STRIP;
+   case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN:
+      return PIPE_PRIM_TRIANGLE_FAN;
+   default:
+      assert(0);
+      return 0;
+   }
+}

@@ -250,7 +250,7 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    {
       const VkPipelineInputAssemblyStateCreateInfo *ia = pipeline->create_info.pInputAssemblyState;
 
-      state->info.mode = ia->topology;
+      state->info.mode = vk_conv_topology(ia->topology);
       state->info.primitive_restart = ia->primitiveRestartEnable;
    }
 
