@@ -905,7 +905,8 @@ VkResult val_CreateBuffer(
       template.target = PIPE_BUFFER;
       template.format = PIPE_FORMAT_R8_UNORM;
       template.width0 = buffer->size;
-
+      template.height0 = 1;
+      template.depth0 = 1;
       buffer->bo = device->pscreen->resource_create_unbacked(device->pscreen,
                                                              &template,
                                                              &buffer->total_size);
