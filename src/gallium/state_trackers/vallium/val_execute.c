@@ -21,13 +21,17 @@ struct rendering_state {
    bool ve_dirty;
    bool vb_dirty;
    bool constbuf_dirty[PIPE_SHADER_TYPES];
-
+   bool vp_dirty;
    struct pipe_draw_info info;
 
    struct pipe_framebuffer_state framebuffer;
+
    struct pipe_blend_state blend_state;
+   void *blend_handle;
    struct pipe_rasterizer_state rs_state;
+   void *rast_handle;
    struct pipe_depth_stencil_alpha_state dsa_state;
+   void *dsa_handle;
 
    struct pipe_shader_state shaders[6];
 
@@ -39,7 +43,7 @@ struct rendering_state {
    struct pipe_scissor_state *scissors;
 
    int num_viewports;
-   struct pipe_viewport_state *viewports;
+   struct pipe_viewport_state viewports[16];
 
    struct pipe_index_buffer index_buffer;
 
@@ -54,29 +58,31 @@ struct rendering_state {
 static VkResult emit_state(struct rendering_state *state)
 {
    if (state->blend_dirty) {
-      void *blend;
-      blend = state->pctx->create_blend_state(state->pctx,
-                                              &state->blend_state);
-      state->pctx->bind_blend_state(state->pctx, blend);
-      state->pctx->delete_blend_state(state->pctx, blend);
+      if (state->blend_handle)
+         state->pctx->delete_blend_state(state->pctx, state->blend_handle);
+      state->blend_handle = state->pctx->create_blend_state(state->pctx,
+                                                            &state->blend_state);
+      state->pctx->bind_blend_state(state->pctx, state->blend_handle);
+
       state->blend_dirty = false;
    }
 
    if (state->rs_dirty) {
-      void *rs;
-      rs = state->pctx->create_rasterizer_state(state->pctx,
-                                                &state->rs_state);
-      state->pctx->bind_rasterizer_state(state->pctx, rs);
-      state->pctx->delete_rasterizer_state(state->pctx, rs);
+      if (state->rast_handle)
+         state->pctx->delete_rasterizer_state(state->pctx, state->rast_handle); 
+      state->rast_handle = state->pctx->create_rasterizer_state(state->pctx,
+                                                                &state->rs_state);
+      state->pctx->bind_rasterizer_state(state->pctx, state->rast_handle);
       state->rs_dirty = false;
    }
 
    if (state->dsa_dirty) {
-      void *dsa;
-      dsa = state->pctx->create_depth_stencil_alpha_state(state->pctx,
-                                                          &state->dsa_state);
-      state->pctx->bind_depth_stencil_alpha_state(state->pctx, dsa);
-      state->pctx->delete_depth_stencil_alpha_state(state->pctx, dsa);
+      if (state->dsa_handle)
+         state->pctx->delete_depth_stencil_alpha_state(state->pctx, state->dsa_handle);
+      state->dsa_handle = state->pctx->create_depth_stencil_alpha_state(state->pctx,
+                                                                        &state->dsa_state);
+      state->pctx->bind_depth_stencil_alpha_state(state->pctx, state->dsa_handle);
+
       state->dsa_dirty = false;
    }
 
@@ -96,12 +102,17 @@ static VkResult emit_state(struct rendering_state *state)
       ve = state->pctx->create_vertex_elements_state(state->pctx, state->num_ve,
                                                      state->ve);
       state->pctx->bind_vertex_elements_state(state->pctx, ve);
-      state->pctx->delete_vertex_elements_state(state->pctx, ve);
+//      state->pctx->delete_vertex_elements_state(state->pctx, ve);
    }
 
    if (state->constbuf_dirty[PIPE_SHADER_VERTEX]) {
       state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_VERTEX,
                                        1, state->const_buffer[PIPE_SHADER_VERTEX]);
+   }
+
+   if (state->vp_dirty) {
+      state->pctx->set_viewport_states(state->pctx, 0, 1, state->viewports);
+      state->vp_dirty = false;
    }
    return VK_SUCCESS;
 }
@@ -241,6 +252,21 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
 
       state->info.mode = ia->topology;
       state->info.primitive_restart = ia->primitiveRestartEnable;
+   }
+
+   if (pipeline->create_info.pViewportState) {
+      const VkPipelineViewportStateCreateInfo *vpi= pipeline->create_info.pViewportState;
+      int i;
+      for (i = 0; i < vpi->viewportCount; i++) {
+         const VkViewport *vp = &vpi->pViewports[i];
+         state->viewports[i].scale[0] = vp->width / 2;
+         state->viewports[i].scale[1] = vp->height / 2;
+         state->viewports[i].scale[2] = 1.0;
+         state->viewports[i].translate[0] = vp->x + vp->width / 2;
+         state->viewports[i].translate[1] = vp->y + vp->height / 2;
+         state->viewports[i].translate[2] = 0.0;
+      }
+      state->vp_dirty = true;
    }
    return VK_SUCCESS;
 }
