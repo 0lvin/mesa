@@ -253,7 +253,9 @@ struct val_queue {
    struct val_device *                         device;
 };
 
-
+struct val_pipeline_cache {
+   struct val_device *                          device;
+};
 struct val_device {
    VK_LOADER_DATA                              _loader_data;
 

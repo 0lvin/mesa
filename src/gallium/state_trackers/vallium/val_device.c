@@ -960,14 +960,6 @@ void val_DestroyBuffer(
    val_free2(&device->alloc, pAllocator, buffer);
 }
 
-void val_DestroySampler(
-    VkDevice                                    _device,
-    VkSampler                                   _sampler,
-    const VkAllocationCallbacks*                pAllocator)
-{
-
-}
-
 VkResult val_CreateFramebuffer(
     VkDevice                                    _device,
     const VkFramebufferCreateInfo*              pCreateInfo,
