@@ -184,7 +184,9 @@ void val_CmdBindVertexBuffers(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
-
+   struct val_buffer **buffers;
+   VkDeviceSize *offsets;
+   int i;
    cmd = val_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -195,8 +197,15 @@ void val_CmdBindVertexBuffers(
 
    cmd->u.vertex_buffers.first = firstBinding;
    cmd->u.vertex_buffers.binding_count = bindingCount;
-   cmd->u.vertex_buffers.buffers = (const struct val_buffer *)pBuffers;
-   cmd->u.vertex_buffers.offsets = pOffsets;
+
+   buffers = malloc(bindingCount * sizeof(struct val_buffer *));
+   offsets = malloc(bindingCount * sizeof(VkDeviceSize));
+   for (i = 0; i < bindingCount; i++) {
+      buffers[i] = val_buffer_from_handle(pBuffers[i]);
+      offsets[i] = pOffsets[i];
+   }
+   cmd->u.vertex_buffers.buffers = buffers;
+   cmd->u.vertex_buffers.offsets = offsets;
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 

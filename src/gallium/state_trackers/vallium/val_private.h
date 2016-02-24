@@ -390,11 +390,25 @@ struct val_descriptor_set_layout {
    /* Bindings in this descriptor set */
    struct val_descriptor_set_binding_layout binding[0];
 };
-   
+
+struct val_descriptor {
+   VkDescriptorType type;
+
+   union {
+      struct {
+         struct val_image_view *image_view;
+         struct val_sampler *sampler;
+      };
+      struct val_buffer_view *buffer_view;
+   };
+};
+
 struct val_descriptor_set {
    const struct val_descriptor_set_layout *layout;
    uint32_t buffer_count;
 
+   struct val_buffer_view *buffer_views;
+   struct val_descriptor descriptors[0];
 };
 
 struct val_pipeline_layout {
@@ -415,7 +429,7 @@ struct val_pipeline {
    struct val_pipeline_layout *                 layout;
    VkGraphicsPipelineCreateInfo create_info;
 };
-   
+
 struct val_buffer {
    struct val_device *                          device;
    VkDeviceSize                                 size;
@@ -426,7 +440,14 @@ struct val_buffer {
    struct pipe_resource *bo;
    uint64_t total_size;
 };
-   
+
+struct val_buffer_view {
+   VkFormat format;
+   struct pipe_resource *bo;
+   uint32_t offset;
+   uint64_t range;
+};
+
 struct val_cmd_pool {
    VkAllocationCallbacks                        alloc;
    struct list_head                             cmd_buffers;
@@ -447,7 +468,7 @@ struct val_cmd_bind_pipeline {
 struct val_cmd_bind_vertex_buffers {
    uint32_t first;
    uint32_t binding_count;
-   const struct val_buffer *buffers;
+   const struct val_buffer **buffers;
    const VkDeviceSize *offsets;
 };
 

@@ -15,6 +15,8 @@ struct rendering_state {
    bool stencil_ref_dirty;
    bool clip_state_dirty;
    bool blend_color_dirty;
+   bool ve_dirty;
+   bool vb_dirty;
    
    struct pipe_draw_info info;
 
@@ -36,6 +38,11 @@ struct rendering_state {
    struct pipe_viewport_state *viewports;
 
    struct pipe_index_buffer index_buffer;
+
+   int start_vb, num_vb;
+   struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
+   int num_ve;
+   struct pipe_vertex_element ve[PIPE_MAX_ATTRIBS];
 };
 
 static VkResult emit_state(struct rendering_state *state)
@@ -71,6 +78,21 @@ static VkResult emit_state(struct rendering_state *state)
       state->pctx->set_stencil_ref(state->pctx, &state->stencil_ref);
       state->stencil_ref_dirty = false;
    }
+
+   if (state->vb_dirty) {
+      state->pctx->set_vertex_buffers(state->pctx, state->start_vb,
+                                      state->num_vb, state->vb);
+      state->vb_dirty = false;
+   }
+
+   if (state->ve_dirty) {
+      void *ve;
+      ve = state->pctx->create_vertex_elements_state(state->pctx, state->num_ve,
+                                                     state->ve);
+      state->pctx->bind_vertex_elements_state(state->pctx, ve);
+      state->pctx->delete_vertex_elements_state(state->pctx, ve);
+   }
+
    return VK_SUCCESS;
 }
 
@@ -136,13 +158,48 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       }
       state->blend_dirty = true;
    }
-   
+
+   {
+      const VkPipelineVertexInputStateCreateInfo *vi = pipeline->create_info.pVertexInputState;
+      int i;
+
+      for (i = 0; i < vi->vertexBindingDescriptionCount; i++) {
+         state->vb[i].stride = vi->pVertexBindingDescriptions[i].stride;
+      }
+
+      for (i = 0; i < vi->vertexAttributeDescriptionCount; i++) {
+         state->ve[i].src_offset = vi->pVertexAttributeDescriptions[i].offset;
+         state->ve[i].vertex_buffer_index = vi->pVertexAttributeDescriptions[i].binding;
+         state->ve[i].src_format = vk_format_to_pipe(vi->pVertexAttributeDescriptions[i].format);
+      }
+      state->num_ve = vi->vertexAttributeDescriptionCount;
+      state->vb_dirty = true;
+      state->ve_dirty = true;
+   }
+
+   {
+      const VkPipelineInputAssemblyStateCreateInfo *ia = pipeline->create_info.pInputAssemblyState;
+
+      state->info.mode = ia->topology;
+      state->info.primitive_restart = ia->primitiveRestartEnable;
+   }
    return VK_SUCCESS;
 }
 
 static VkResult handle_vertex_buffers(struct val_cmd_buffer_entry *cmd,
                                       struct rendering_state *state)
 {
+   int i;
+   struct val_cmd_bind_vertex_buffers *vcb = &cmd->u.vertex_buffers;
+   for (i = 0; i < vcb->binding_count; i++) {
+      int idx = i + vcb->first;
+
+      state->vb[idx].buffer_offset = vcb->offsets[i];
+      state->vb[idx].buffer = vcb->buffers[i]->bo;
+   }
+   state->start_vb = vcb->first;
+   state->num_vb = vcb->binding_count;
+   state->vb_dirty = true;
    return VK_SUCCESS;
 }
 
@@ -215,6 +272,11 @@ static VkResult handle_end_render_pass(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_draw(struct val_cmd_buffer_entry *cmd,
                             struct rendering_state *state)
 {
+   state->info.start = cmd->u.draw.first_vertex;
+   state->info.count = cmd->u.draw.vertex_count;
+   state->info.start_instance = cmd->u.draw.first_instance;
+   state->info.instance_count = cmd->u.draw.instance_count;
+   state->pctx->draw_vbo(state->pctx, &state->info);
    return VK_SUCCESS;
 }
 
