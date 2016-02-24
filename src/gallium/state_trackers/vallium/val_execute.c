@@ -20,7 +20,8 @@ struct rendering_state {
    bool blend_color_dirty;
    bool ve_dirty;
    bool vb_dirty;
-   
+   bool constbuf_dirty[PIPE_SHADER_TYPES];
+
    struct pipe_draw_info info;
 
    struct pipe_framebuffer_state framebuffer;
@@ -42,6 +43,8 @@ struct rendering_state {
 
    struct pipe_index_buffer index_buffer;
 
+   struct pipe_constant_buffer const_buffer[PIPE_SHADER_TYPES][16];
+   int num_const_bufs;
    int start_vb, num_vb;
    struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
    int num_ve;
@@ -96,6 +99,10 @@ static VkResult emit_state(struct rendering_state *state)
       state->pctx->delete_vertex_elements_state(state->pctx, ve);
    }
 
+   if (state->constbuf_dirty[PIPE_SHADER_VERTEX]) {
+      state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_VERTEX,
+                                       1, state->const_buffer[PIPE_SHADER_VERTEX]);
+   }
    return VK_SUCCESS;
 }
 
@@ -258,6 +265,27 @@ static VkResult handle_vertex_buffers(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
                                        struct rendering_state *state)
 {
+   struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
+   int i;
+   int j;
+   state->num_const_bufs = 0;
+   for (i = 0; i < bds->count; i++) {
+      const struct val_descriptor_set *set = bds->sets[i];
+
+      if (set->layout->shader_stages & VK_SHADER_STAGE_VERTEX_BIT) {
+         int sidx = PIPE_SHADER_VERTEX;
+         for (j = 0; j < set->buffer_count; j++) {
+            int idx = state->num_const_bufs;
+            if (set->descriptors[j].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+               state->const_buffer[sidx][idx].buffer = set->buffer_views->bo;
+               state->const_buffer[sidx][idx].buffer_offset = set->buffer_views->offset;
+               state->const_buffer[sidx][idx].buffer_size = set->buffer_views->range;
+            }
+         }
+         state->constbuf_dirty[sidx] = true;
+      }
+   }
+
    return VK_SUCCESS;
 }
 

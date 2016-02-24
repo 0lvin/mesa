@@ -244,7 +244,9 @@ void val_CmdBindDescriptorSets(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    VAL_FROM_HANDLE(val_pipeline_layout, layout, _layout);
    struct val_cmd_buffer_entry *cmd;
-
+   struct val_descriptor_set **sets;
+   uint32_t *offsets;
+   int i;
    cmd = val_alloc(&cmd_buffer->pool->alloc,
                    sizeof(*cmd),
                    8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -256,9 +258,18 @@ void val_CmdBindDescriptorSets(
    cmd->u.descriptor_sets.layout = layout;
    cmd->u.descriptor_sets.first = firstSet;
    cmd->u.descriptor_sets.count = descriptorSetCount;
-   cmd->u.descriptor_sets.sets = (const struct val_descriptor_set *)pDescriptorSets;
+
+   sets = malloc(descriptorSetCount * sizeof(struct val_descriptor_set *));
+   for (i = 0; i < descriptorSetCount; i++) {
+      sets[i] = val_descriptor_set_from_handle(pDescriptorSets[i]);
+   }
+   cmd->u.descriptor_sets.sets = sets;
+
    cmd->u.descriptor_sets.dynamic_offset_count = dynamicOffsetCount;
-   cmd->u.descriptor_sets.dynamic_offsets = pDynamicOffsets;
+   offsets = malloc(dynamicOffsetCount * sizeof(uint32_t));
+   for (i = 0; i < dynamicOffsetCount; i++)
+      offsets[i] = pDynamicOffsets[i];
+   cmd->u.descriptor_sets.dynamic_offsets = offsets;
 
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);   
 }

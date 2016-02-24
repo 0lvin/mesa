@@ -98,6 +98,7 @@ VAL_DEFINE_HANDLE_CASTS(val_queue, VkQueue)
 
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_cmd_pool, VkCommandPool)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_buffer, VkBuffer)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_buffer_view, VkBufferView)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set, VkDescriptorSet)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_descriptor_set_layout, VkDescriptorSetLayout)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_device_memory, VkDeviceMemory)
@@ -411,6 +412,15 @@ struct val_descriptor_set {
    struct val_descriptor descriptors[0];
 };
 
+VkResult
+val_descriptor_set_create(struct val_device *device,
+                          const struct val_descriptor_set_layout *layout,
+                          struct val_descriptor_set **out_set);
+
+void
+val_descriptor_set_destroy(struct val_device *device,
+                           struct val_descriptor_set *set);
+   
 struct val_pipeline_layout {
    struct {
       struct val_descriptor_set_layout *layout;
@@ -477,7 +487,7 @@ struct val_cmd_bind_descriptor_sets {
    struct val_pipeline_layout *layout;
    uint32_t first;
    uint32_t count;
-   const struct val_descriptor_set *sets;
+   const struct val_descriptor_set **sets;
    uint32_t dynamic_offset_count;
    const uint32_t *dynamic_offsets;
 };
