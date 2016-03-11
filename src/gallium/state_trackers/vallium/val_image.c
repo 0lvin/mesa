@@ -88,6 +88,7 @@ val_CreateImageView(VkDevice _device,
    view->components = pCreateInfo->components;
    view->subresourceRange = pCreateInfo->subresourceRange;
    view->image = image;
+   view->surface = NULL;
    *pView = val_image_view_to_handle(view);
 
    return VK_SUCCESS;
