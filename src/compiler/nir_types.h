@@ -144,6 +144,7 @@ const struct glsl_type * glsl_function_type(const struct glsl_type *return_type,
 
 const struct glsl_type *glsl_transposed_type(const struct glsl_type *type);
 
+  int glsl_type_size_vec4(const struct glsl_type *type);
 #ifdef __cplusplus
 }
 #endif
