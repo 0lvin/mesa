@@ -1,5 +1,5 @@
 #include "val_private.h"
-
+#include "util/u_format.h"
 #include "pipe/p_state.h"
 VkResult
 val_image_create(VkDevice _device,
@@ -112,6 +112,10 @@ void val_GetImageSubresourceLayout(
 {
    VAL_FROM_HANDLE(val_image, image, _image);
 
+   pLayout->offset = 0;
+   pLayout->rowPitch = util_format_get_stride(image->bo->format, image->bo->width0);
+   pLayout->arrayPitch = 0;
+   pLayout->size = image->size;
    switch (pSubresource->aspectMask) {
    case VK_IMAGE_ASPECT_COLOR_BIT:
       break;
