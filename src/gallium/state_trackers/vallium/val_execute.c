@@ -181,14 +181,16 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
 	 memset(&shstate, 0, sizeof(shstate));
 	 VAL_FROM_HANDLE(val_shader_module, module,
 			 sh->module);
-	 shstate.tokens = module->tgsi;
          switch (sh->stage) {
          case VK_SHADER_STAGE_FRAGMENT_BIT:
+            shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT];
+
 	    state->shader_cso[PIPE_SHADER_FRAGMENT] = state->pctx->create_fs_state(state->pctx, &shstate);
             //shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
             state->pctx->bind_fs_state(state->pctx, state->shader_cso[PIPE_SHADER_FRAGMENT]);
             break;
          case VK_SHADER_STAGE_VERTEX_BIT:
+            shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_VERTEX];
             state->shader_cso[PIPE_SHADER_VERTEX] = state->pctx->create_vs_state(state->pctx, &shstate);
             // shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
             state->pctx->bind_vs_state(state->pctx, state->shader_cso[PIPE_SHADER_VERTEX]);
@@ -459,8 +461,11 @@ VkResult val_execute_cmds(struct val_device *device,
    state.pctx->bind_vertex_elements_state(state.pctx, NULL);
    state.pctx->bind_vs_state(state.pctx, NULL);
    state.pctx->bind_fs_state(state.pctx, NULL);
-   state.pctx->delete_vertex_elements_state(state.pctx, state.velems_cso);
-   state.pctx->delete_vs_state(state.pctx, state.shader_cso[PIPE_SHADER_VERTEX]);
+   if (state.velems_cso)
+      state.pctx->delete_vertex_elements_state(state.pctx, state.velems_cso);
+   if (state.shader_cso[PIPE_SHADER_VERTEX])
+      state.pctx->delete_vs_state(state.pctx, state.shader_cso[PIPE_SHADER_VERTEX]);
+   if (state.shader_cso[PIPE_SHADER_FRAGMENT])
    state.pctx->delete_fs_state(state.pctx, state.shader_cso[PIPE_SHADER_FRAGMENT]);
    state.pctx->destroy(state.pctx);
    return VK_SUCCESS;

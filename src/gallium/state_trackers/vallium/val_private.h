@@ -194,7 +194,6 @@ val_free2(const VkAllocationCallbacks *parent_alloc,
 }
 
 struct val_shader_module {
-   const void *tgsi;
    uint32_t                                     size;
    char                                         data[0];
 };
@@ -441,6 +440,8 @@ struct val_pipeline_layout {
 struct val_pipeline {
    struct val_device *                          device;
    struct val_pipeline_layout *                 layout;
+
+   void *pipeline_tgsi[MESA_SHADER_STAGES];
    VkGraphicsPipelineCreateInfo create_info;
 };
 

@@ -42,8 +42,6 @@ void val_DestroyShaderModule(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_shader_module, module, _module);
 
-   if (module->tgsi)
-      tgsi_free_tokens(module->tgsi);
    val_free2(&device->alloc, pAllocator, module);
 }
 
@@ -54,6 +52,12 @@ void val_DestroyPipeline(
 {
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_pipeline, pipeline, _pipeline);
+
+   if (pipeline->pipeline_tgsi[MESA_SHADER_VERTEX])
+      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_VERTEX]);
+
+   if (pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT])
+      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT]);
    val_free2(&device->alloc, pAllocator, pipeline);
 }
 
@@ -339,7 +343,7 @@ st_shader_stage_to_tgsi_target(gl_shader_stage stage)
    return PIPE_SHADER_VERTEX;
 }
 
-static void
+static void *
 val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
                            struct val_shader_module *module,
                            const char *entrypoint_name,
@@ -349,7 +353,7 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
    if (strcmp(entrypoint_name, "main") != 0) {
       val_finishme("Multiple shaders per module not really supported");
    }
-
+   void *tgsi;
    nir_shader *nir;
    nir_function *entry_point;
    nir_shader_compiler_options options = {};
@@ -407,12 +411,13 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
       } while (progress);
 
       nir_remove_dead_variables(nir, nir_var_local);
-      module->tgsi = nir_to_tgsi(nir, st_shader_stage_to_tgsi_target(stage));
-      if (module->tgsi)
-         tgsi_dump(module->tgsi, 0);
+      tgsi = nir_to_tgsi(nir, st_shader_stage_to_tgsi_target(stage));
+      if (tgsi)
+         tgsi_dump(tgsi, 0);
 
       ralloc_free(nir);
    }
+   return tgsi;
 }
 
 
@@ -423,7 +428,7 @@ val_pipeline_compile(struct val_pipeline *pipeline,
                      gl_shader_stage stage,
                      const VkSpecializationInfo *spec_info)
 {
-   val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
+   pipeline->pipeline_tgsi[stage] = val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
    return VK_SUCCESS;
 }
 
