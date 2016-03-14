@@ -1,5 +1,11 @@
 #include "val_private.h"
 
+#include "glsl_types.h"
+#include "nir/spirv/nir_spirv.h"
+#include "nir/nir_to_tgsi.h"
+
+#include "tgsi/tgsi_dump.h"
+#define SPIR_V_MAGIC_NUMBER 0x07230203
 VkResult val_CreateShaderModule(
     VkDevice                                    _device,
     const VkShaderModuleCreateInfo*             pCreateInfo,
@@ -17,6 +23,9 @@ VkResult val_CreateShaderModule(
                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (module == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   module->size = pCreateInfo->codeSize;
+   memcpy(module->data, pCreateInfo->pCode, module->size);
 
    *pShaderModule = val_shader_module_to_handle(module);
 
@@ -283,6 +292,136 @@ deep_copy_create_info(VkGraphicsPipelineCreateInfo *dst,
    return VK_SUCCESS;
 }
 
+static inline unsigned
+st_shader_stage_to_ptarget(gl_shader_stage stage)
+{
+   switch (stage) {
+   case MESA_SHADER_VERTEX:
+      return PIPE_SHADER_VERTEX;
+   case MESA_SHADER_FRAGMENT:
+      return PIPE_SHADER_FRAGMENT;
+   case MESA_SHADER_GEOMETRY:
+      return PIPE_SHADER_GEOMETRY;
+   case MESA_SHADER_TESS_CTRL:
+      return PIPE_SHADER_TESS_CTRL;
+   case MESA_SHADER_TESS_EVAL:
+      return PIPE_SHADER_TESS_EVAL;
+   case MESA_SHADER_COMPUTE:
+      return PIPE_SHADER_COMPUTE;
+   }
+
+   assert(!"should not be reached");
+   return PIPE_SHADER_VERTEX;
+}
+
+static inline unsigned
+st_shader_stage_to_tgsi_target(gl_shader_stage stage)
+{
+   switch (stage) {
+   case MESA_SHADER_VERTEX:
+      return TGSI_PROCESSOR_VERTEX;
+   case MESA_SHADER_FRAGMENT:
+      return TGSI_PROCESSOR_FRAGMENT;
+   case MESA_SHADER_GEOMETRY:
+      return PIPE_SHADER_GEOMETRY;
+   case MESA_SHADER_TESS_CTRL:
+      return PIPE_SHADER_TESS_CTRL;
+   case MESA_SHADER_TESS_EVAL:
+      return PIPE_SHADER_TESS_EVAL;
+   case MESA_SHADER_COMPUTE:
+      return PIPE_SHADER_COMPUTE;
+   }
+
+   assert(!"should not be reached");
+   return PIPE_SHADER_VERTEX;
+}
+
+static void *
+val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
+                           struct val_shader_module *module,
+                           const char *entrypoint_name,
+                           gl_shader_stage stage,
+                           const VkSpecializationInfo *spec_info)
+{
+   if (strcmp(entrypoint_name, "main") != 0) {
+      val_finishme("Multiple shaders per module not really supported");
+   }
+
+   nir_shader *nir;
+   nir_function *entry_point;
+   nir_shader_compiler_options options = {};
+   bool progress;
+   options.native_integers = true;
+   {
+      uint32_t *spirv = (uint32_t *) module->data;
+      assert(spirv[0] == SPIR_V_MAGIC_NUMBER);
+      assert(module->size % 4 == 0);
+
+      uint32_t num_spec_entries = 0;
+      struct nir_spirv_specialization *spec_entries = NULL;
+      if (spec_info && spec_info->mapEntryCount > 0) {
+         num_spec_entries = spec_info->mapEntryCount;
+         spec_entries = malloc(num_spec_entries * sizeof(*spec_entries));
+         for (uint32_t i = 0; i < num_spec_entries; i++) {
+            const uint32_t *data =
+               spec_info->pData + spec_info->pMapEntries[i].offset;
+            assert((const void *)(data + 1) <=
+                   spec_info->pData + spec_info->dataSize);
+
+            spec_entries[i].id = spec_info->pMapEntries[i].constantID;
+            spec_entries[i].data = *data;
+         }
+      }
+
+      entry_point = spirv_to_nir(spirv, module->size / 4,
+                                 spec_entries, num_spec_entries,
+                                 stage, entrypoint_name, &options);
+
+      nir = entry_point->shader;
+      nir_validate_shader(nir);
+
+      free(spec_entries);
+
+      nir_lower_global_vars_to_local(nir);
+      nir_lower_returns(nir);
+      nir_validate_shader(nir);
+
+      nir_inline_functions(nir);
+      nir_validate_shader(nir);
+
+      nir_opt_global_to_local(nir);
+
+      nir_lower_load_const_to_scalar(nir);
+      do {
+         progress = false;
+
+         nir_lower_vars_to_ssa(nir);
+         progress |= nir_copy_prop(nir);
+         progress |= nir_opt_dce(nir);
+         progress |= nir_opt_cse(nir);
+         progress |= nir_opt_algebraic(nir);
+         progress |= nir_opt_constant_folding(nir);
+      } while (progress);
+
+      nir_remove_dead_variables(nir, nir_var_local);
+      module->tgsi = nir_to_tgsi(nir, st_shader_stage_to_tgsi_target(stage));
+      if (module->tgsi)
+         tgsi_dump(module->tgsi, 0);
+   }
+}
+
+
+static VkResult
+val_pipeline_compile(struct val_pipeline *pipeline,
+                     struct val_shader_module *module,
+                     const char *entrypoint,
+                     gl_shader_stage stage,
+                     const VkSpecializationInfo *spec_info)
+{
+   val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
+   return VK_SUCCESS;
+}
+
 static VkResult
 val_pipeline_init(struct val_pipeline *pipeline,
                   struct val_device *device,
@@ -296,11 +435,33 @@ val_pipeline_init(struct val_pipeline *pipeline,
    pipeline->device = device;
    pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
 
-
    /* recreate createinfo */
    deep_copy_create_info(&pipeline->create_info, pCreateInfo);
+
+   for (uint32_t i = 0; i < pCreateInfo->stageCount; i++) {
+      VAL_FROM_HANDLE(val_shader_module, module,
+                      pCreateInfo->pStages[i].module);
+
+      switch (pCreateInfo->pStages[i].stage) {
+      case VK_SHADER_STAGE_VERTEX_BIT:
+         val_pipeline_compile(pipeline, module,
+                              pCreateInfo->pStages[i].pName,
+                              MESA_SHADER_VERTEX,
+                              pCreateInfo->pStages[i].pSpecializationInfo);
+         break;
+      case VK_SHADER_STAGE_FRAGMENT_BIT:
+         val_pipeline_compile(pipeline, module,
+                              pCreateInfo->pStages[i].pName,
+                              MESA_SHADER_FRAGMENT,
+                              pCreateInfo->pStages[i].pSpecializationInfo);
+         break;
+      default:
+         val_finishme("Unsupported shader stage");
+      }
+   }
    return VK_SUCCESS;
 }
+
 
 static VkResult
 val_graphics_pipeline_create(

@@ -16,6 +16,7 @@ lib@VALLIUM_LIBNAME@_la_LDFLAGS = \
 lib@VALLIUM_LIBNAME@_la_LIBADD = \
 	$(top_builddir)/src/gallium/state_trackers/vallium/libvallium.la \
 	$(top_builddir)/src/gallium/auxiliary/libgallium.la \
+	$(top_builddir)/src/compiler/nir/libnir.la \
 	$(top_builddir)/src/util/libmesautil.la \
 	$(VALLIUM_LIBS) \
 	$(PTHREAD_LIBS) \

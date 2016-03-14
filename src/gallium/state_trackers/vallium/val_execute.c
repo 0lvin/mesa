@@ -169,13 +169,20 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       for (i = 0; i < pipeline->create_info.stageCount; i++) {
          const VkPipelineShaderStageCreateInfo *sh = &pipeline->create_info.pStages[i];
          void *shader;
+	 struct pipe_shader_state shstate;
+	 memset(&shstate, 0, sizeof(shstate));
+	 VAL_FROM_HANDLE(val_shader_module, module,
+			 sh->module);
+	 shstate.tokens = module->tgsi;
          switch (sh->stage) {
          case VK_SHADER_STAGE_FRAGMENT_BIT:
-            shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
+	    shader = state->pctx->create_fs_state(state->pctx, &shstate);
+            //shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
             state->pctx->bind_fs_state(state->pctx, shader);
             break;
          case VK_SHADER_STAGE_VERTEX_BIT:
-            shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
+	    shader = state->pctx->create_vs_state(state->pctx, &shstate);
+	   //shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
             state->pctx->bind_vs_state(state->pctx, shader);
             break;
          default:
