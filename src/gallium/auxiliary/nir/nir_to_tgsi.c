@@ -49,11 +49,115 @@ struct ntt_compile {
 
 static void ntt_emit_cf_list(struct ntt_compile *c, struct exec_list *list);
 
+static inline unsigned
+st_get_generic_varying_index(bool needs_texcoord, GLuint attr)
+{
+   if (attr >= VARYING_SLOT_VAR0) {
+      if (needs_texcoord)
+         return attr - VARYING_SLOT_VAR0;
+      else
+         return 9 + (attr - VARYING_SLOT_VAR0);
+   }
+   if (attr == VARYING_SLOT_PNTC) {
+       assert(!needs_texcoord);
+      return 8;
+   }
+   if (attr >= VARYING_SLOT_TEX0 && attr <= VARYING_SLOT_TEX7) {
+      assert(!needs_texcoord);
+      return attr - VARYING_SLOT_TEX0;
+   }
+
+   assert(0);
+   return 0;
+}
+
+static int translate_semantic_attr(int attr, bool needs_texcoord,
+				   unsigned *tgsi_name, unsigned *tgsi_slot)
+{
+    switch (attr) {
+    case VARYING_SLOT_POS:
+	*tgsi_name = TGSI_SEMANTIC_POSITION;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_COL0:
+	*tgsi_name = TGSI_SEMANTIC_COLOR;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_COL1:
+	*tgsi_name = TGSI_SEMANTIC_COLOR;
+	*tgsi_slot = 1;
+	break;
+    case VARYING_SLOT_BFC0:
+	*tgsi_name = TGSI_SEMANTIC_BCOLOR;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_BFC1:
+	*tgsi_name = TGSI_SEMANTIC_BCOLOR;
+	*tgsi_slot = 1;
+	break;
+    case VARYING_SLOT_FOGC:
+	*tgsi_name = TGSI_SEMANTIC_FOG;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_PSIZ:
+	*tgsi_name = TGSI_SEMANTIC_PSIZE;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_CLIP_DIST0:
+	*tgsi_name = TGSI_SEMANTIC_CLIPDIST;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_CLIP_DIST1:
+	*tgsi_name = TGSI_SEMANTIC_CLIPDIST;
+	*tgsi_slot = 1;
+	break;
+    case VARYING_SLOT_EDGE:
+	assert(0);
+	break;
+    case VARYING_SLOT_CLIP_VERTEX:
+	*tgsi_name = TGSI_SEMANTIC_CLIPVERTEX;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_LAYER:
+	*tgsi_name = TGSI_SEMANTIC_LAYER;
+	*tgsi_slot = 0;
+	break;
+    case VARYING_SLOT_VIEWPORT:
+	*tgsi_name = TGSI_SEMANTIC_VIEWPORT_INDEX;
+	*tgsi_slot = 0;
+	break;
+
+    case VARYING_SLOT_TEX0:
+    case VARYING_SLOT_TEX1:
+    case VARYING_SLOT_TEX2:
+    case VARYING_SLOT_TEX3:
+    case VARYING_SLOT_TEX4:
+    case VARYING_SLOT_TEX5:
+    case VARYING_SLOT_TEX6:
+    case VARYING_SLOT_TEX7:
+	if (needs_texcoord) {
+	    *tgsi_name = TGSI_SEMANTIC_TEXCOORD;
+	    *tgsi_slot = attr - VARYING_SLOT_TEX0;
+	    break;
+	}
+	/* fall through */
+    case VARYING_SLOT_VAR0:
+    default:
+	assert(attr >= VARYING_SLOT_VAR0 ||
+	       (attr >= VARYING_SLOT_TEX0 && attr <= VARYING_SLOT_TEX7));
+	*tgsi_name = TGSI_SEMANTIC_GENERIC;
+	*tgsi_slot =
+	    st_get_generic_varying_index(needs_texcoord, attr);
+	break;
+    }
+    return 0;
+}
+
 static void
 ntt_setup_inputs(struct ntt_compile *c)
 {
    unsigned num_inputs = 0;
-
+   int idx = 0;
    foreach_list_typed(nir_variable, var, node, &c->s->inputs) {
       unsigned array_len = MAX2(glsl_get_length(var->type), 1);
 
@@ -66,11 +170,12 @@ ntt_setup_inputs(struct ntt_compile *c)
       unsigned array_len = MAX2(glsl_get_length(var->type), 1);
       unsigned i;
       struct ureg_src decl;
-
+      unsigned loc;
       /* XXX: map loc slots to semantics */
 
       if (c->target == TGSI_PROCESSOR_VERTEX) {
-         decl = ureg_DECL_vs_input(c->ureg, var->data.driver_location);
+	  loc = var->data.location - VERT_ATTRIB_GENERIC0;
+	  decl = ureg_DECL_vs_input(c->ureg, loc);
       } else if (c->target == TGSI_PROCESSOR_FRAGMENT) {
          static const unsigned interpolation_map[] = {
             TGSI_INTERPOLATE_PERSPECTIVE, /* INTERP_QUALIFIER_NONE */
@@ -82,6 +187,9 @@ ntt_setup_inputs(struct ntt_compile *c)
          unsigned sample_loc;
          unsigned semantic_name = var->data.location;
          unsigned semantic_index = var->data.index;
+
+	 translate_semantic_attr(var->data.location, false,
+				 &semantic_name, &semantic_index);
 
          if (var->data.sample)
             sample_loc = TGSI_INTERPOLATE_LOC_SAMPLE;
@@ -104,7 +212,8 @@ ntt_setup_inputs(struct ntt_compile *c)
       }
 
       for (i = 0; i < array_len; i++)
-         c->input_index_map[var->data.driver_location + i] = decl.Index + i;
+         c->input_index_map[idx + i] = decl.Index + i;
+      idx++;
    }
 }
 
@@ -127,6 +236,16 @@ ntt_setup_outputs(struct ntt_compile *c)
       unsigned semantic_index = var->data.index;
       unsigned i;
       struct ureg_dst decl;
+
+      if (c->target == TGSI_PROCESSOR_VERTEX) {
+	  translate_semantic_attr(var->data.location, false,
+				  &semantic_name, &semantic_index);
+      } else {
+	  if (var->data.location == FRAG_RESULT_DATA0) {
+	      semantic_name = TGSI_SEMANTIC_COLOR;
+	      semantic_index = 0;
+	  }
+      }
 
       decl = ureg_DECL_output(c->ureg, semantic_name, semantic_index);
 
@@ -633,6 +752,32 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
    }
 
    switch (instr->intrinsic) {
+
+   case nir_intrinsic_vulkan_resource_index: {
+       uint32_t set = nir_intrinsic_desc_set(instr);
+       uint32_t binding = nir_intrinsic_binding(instr);
+
+       ureg_DECL_constant2D(c->ureg, 0, 11, set + 1);
+       break;
+   }
+
+   case nir_intrinsic_load_ubo: {
+       nir_const_value *const_offset;
+       struct ureg_src src;
+
+       const_offset = nir_src_as_const_value(instr->src[1]);
+       if (const_offset) {
+	   int fine = const_offset->u[0] - ((const_offset->u[0]/16)*16);
+	   fprintf(stderr, "const is %d fine is %d\n", const_offset->u[0], fine);
+	   src = ureg_src_dimension(ureg_src_register(TGSI_FILE_CONSTANT, const_offset->u[0]/16), instr->const_index[0] + 1);
+       }
+      if (only_def) {
+	  *dst = ureg_dst(src);
+      } else {
+	  ureg_MOV(c->ureg, *dst, src);
+      }
+       break;
+   }
    case nir_intrinsic_load_uniform: {
       uint32_t index = instr->const_index[0];
       struct ureg_src src = ureg_src_register(TGSI_FILE_CONSTANT, index);
@@ -668,7 +813,7 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       struct ureg_src src = ureg_src_register(TGSI_FILE_INPUT,
                                               c->input_index_map[index]);
 
-      assert(instr->const_index[1] == 1);
+      //   assert(instr->const_index[1] == 1);
 
       if (only_def) {
          *dst = ureg_dst(src);
@@ -684,7 +829,7 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       struct ureg_dst out = ureg_dst_register(TGSI_FILE_OUTPUT,
                                               c->output_index_map[index]);
 
-      assert(instr->const_index[1] == 1);
+//      assert(instr->const_index[1] == 1);
 
       ureg_MOV(c->ureg, out, src);
    }
@@ -1043,6 +1188,20 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    nir_convert_from_ssa(s, false);
    nir_lower_vec_to_movs(s);
 
+   if (s->stage == MESA_SHADER_VERTEX) {
+      foreach_list_typed(nir_variable, var, node, &s->inputs) {
+         var->data.driver_location = var->data.location;
+      }
+      foreach_list_typed(nir_variable, var, node, &s->outputs) {
+         var->data.driver_location = var->data.location;
+      }
+   }
+
+
+   nir_lower_io(s, nir_var_shader_in, glsl_type_size_vec4);
+   nir_lower_io(s, nir_var_shader_out, glsl_type_size_vec4);
+
+   nir_opt_constant_folding(s);
    nir_print_shader(s, stdout);
    c = rzalloc(NULL, struct ntt_compile);
 
