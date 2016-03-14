@@ -157,7 +157,6 @@ static void
 ntt_setup_inputs(struct ntt_compile *c)
 {
    unsigned num_inputs = 0;
-   int idx = 0;
    foreach_list_typed(nir_variable, var, node, &c->s->inputs) {
       unsigned array_len = MAX2(glsl_get_length(var->type), 1);
 
@@ -212,8 +211,7 @@ ntt_setup_inputs(struct ntt_compile *c)
       }
 
       for (i = 0; i < array_len; i++)
-         c->input_index_map[idx + i] = decl.Index + i;
-      idx++;
+         c->input_index_map[var->data.driver_location + i] = decl.Index + i;
    }
 }
 
