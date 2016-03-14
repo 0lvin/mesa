@@ -6,7 +6,6 @@
 #include "pipe/p_state.h"
 #include "val_conv.h"
 
-#include "val_tgsi_hack.h"
 #include "pipe/p_shader_tokens.h"
 #include "tgsi/tgsi_text.h"
 #include "tgsi/tgsi_parse.h"
@@ -186,13 +185,11 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
             shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT];
 
 	    state->shader_cso[PIPE_SHADER_FRAGMENT] = state->pctx->create_fs_state(state->pctx, &shstate);
-            //shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
             state->pctx->bind_fs_state(state->pctx, state->shader_cso[PIPE_SHADER_FRAGMENT]);
             break;
          case VK_SHADER_STAGE_VERTEX_BIT:
             shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_VERTEX];
             state->shader_cso[PIPE_SHADER_VERTEX] = state->pctx->create_vs_state(state->pctx, &shstate);
-            // shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
             state->pctx->bind_vs_state(state->pctx, state->shader_cso[PIPE_SHADER_VERTEX]);
             break;
          default:
