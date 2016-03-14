@@ -194,7 +194,7 @@ val_free2(const VkAllocationCallbacks *parent_alloc,
 }
 
 struct val_shader_module {
-   void *tgsi;
+   const void *tgsi;
    uint32_t                                     size;
    char                                         data[0];
 };

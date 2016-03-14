@@ -9,6 +9,7 @@
 #include "val_tgsi_hack.h"
 #include "pipe/p_shader_tokens.h"
 #include "tgsi/tgsi_text.h"
+#include "tgsi/tgsi_parse.h"
 struct rendering_state {
    struct pipe_context *pctx;
 
@@ -33,8 +34,6 @@ struct rendering_state {
    struct pipe_depth_stencil_alpha_state dsa_state;
    void *dsa_handle;
 
-   struct pipe_shader_state shaders[6];
-
    struct pipe_blend_color blend_color;
    struct pipe_stencil_ref stencil_ref;
    struct pipe_clip_state clip_state;
@@ -53,6 +52,9 @@ struct rendering_state {
    struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
    int num_ve;
    struct pipe_vertex_element ve[PIPE_MAX_ATTRIBS];
+
+   void *velems_cso;
+   void *shader_cso[PIPE_SHADER_TYPES];
 };
 
 static VkResult emit_state(struct rendering_state *state)
@@ -98,11 +100,17 @@ static VkResult emit_state(struct rendering_state *state)
    }
 
    if (state->ve_dirty) {
-      void *ve;
-      ve = state->pctx->create_vertex_elements_state(state->pctx, state->num_ve,
-                                                     state->ve);
-      state->pctx->bind_vertex_elements_state(state->pctx, ve);
+      void *ve = NULL;
+      if (state->velems_cso)
+         ve = state->velems_cso;
+
+      state->velems_cso = state->pctx->create_vertex_elements_state(state->pctx, state->num_ve,
+                                                                    state->ve);
+      state->pctx->bind_vertex_elements_state(state->pctx, state->velems_cso);
 //      state->pctx->delete_vertex_elements_state(state->pctx, ve);
+
+      if (ve)
+         state->pctx->delete_vertex_elements_state(state->pctx, ve);
    }
 
    if (state->constbuf_dirty[PIPE_SHADER_VERTEX]) {
@@ -176,14 +184,14 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
 	 shstate.tokens = module->tgsi;
          switch (sh->stage) {
          case VK_SHADER_STAGE_FRAGMENT_BIT:
-	    shader = state->pctx->create_fs_state(state->pctx, &shstate);
+	    state->shader_cso[PIPE_SHADER_FRAGMENT] = state->pctx->create_fs_state(state->pctx, &shstate);
             //shader = parse_fragment_shader(state->pctx, hack_tgsi_fs);
-            state->pctx->bind_fs_state(state->pctx, shader);
+            state->pctx->bind_fs_state(state->pctx, state->shader_cso[PIPE_SHADER_FRAGMENT]);
             break;
          case VK_SHADER_STAGE_VERTEX_BIT:
-	    shader = state->pctx->create_vs_state(state->pctx, &shstate);
-	   //shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
-            state->pctx->bind_vs_state(state->pctx, shader);
+            state->shader_cso[PIPE_SHADER_VERTEX] = state->pctx->create_vs_state(state->pctx, &shstate);
+            // shader = parse_vertex_shader(state->pctx, hack_tgsi_vs);
+            state->pctx->bind_vs_state(state->pctx, state->shader_cso[PIPE_SHADER_VERTEX]);
             break;
          default:
             assert(0);
@@ -447,6 +455,13 @@ VkResult val_execute_cmds(struct val_device *device,
          break;
       }
    }
+
+   state.pctx->bind_vertex_elements_state(state.pctx, NULL);
+   state.pctx->bind_vs_state(state.pctx, NULL);
+   state.pctx->bind_fs_state(state.pctx, NULL);
+   state.pctx->delete_vertex_elements_state(state.pctx, state.velems_cso);
+   state.pctx->delete_vs_state(state.pctx, state.shader_cso[PIPE_SHADER_VERTEX]);
+   state.pctx->delete_fs_state(state.pctx, state.shader_cso[PIPE_SHADER_FRAGMENT]);
    state.pctx->destroy(state.pctx);
    return VK_SUCCESS;
 }

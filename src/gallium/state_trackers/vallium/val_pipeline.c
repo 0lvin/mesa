@@ -4,6 +4,7 @@
 #include "nir/spirv/nir_spirv.h"
 #include "nir/nir_to_tgsi.h"
 
+#include "tgsi/tgsi_parse.h"
 #include "tgsi/tgsi_dump.h"
 #define SPIR_V_MAGIC_NUMBER 0x07230203
 VkResult val_CreateShaderModule(
@@ -41,6 +42,8 @@ void val_DestroyShaderModule(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_shader_module, module, _module);
 
+   if (module->tgsi)
+      tgsi_free_tokens(module->tgsi);
    val_free2(&device->alloc, pAllocator, module);
 }
 
@@ -336,7 +339,7 @@ st_shader_stage_to_tgsi_target(gl_shader_stage stage)
    return PIPE_SHADER_VERTEX;
 }
 
-static void *
+static void
 val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
                            struct val_shader_module *module,
                            const char *entrypoint_name,
@@ -407,6 +410,8 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
       module->tgsi = nir_to_tgsi(nir, st_shader_stage_to_tgsi_target(stage));
       if (module->tgsi)
          tgsi_dump(module->tgsi, 0);
+
+      ralloc_free(nir);
    }
 }
 
