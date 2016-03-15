@@ -1242,7 +1242,6 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    nir_lower_io(s, nir_var_shader_in, glsl_type_size_vec4);
    nir_lower_io(s, nir_var_shader_out, glsl_type_size_vec4);
 
-   nir_opt_constant_folding(s);
    nir_print_shader(s, stdout);
    c = rzalloc(NULL, struct ntt_compile);
 
