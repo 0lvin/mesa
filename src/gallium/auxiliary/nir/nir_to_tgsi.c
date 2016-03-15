@@ -759,6 +759,16 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
        break;
    }
 
+   case nir_intrinsic_load_var: {
+      struct ureg_src src;
+      if (!strcmp(instr->variables[0]->var->name, "gl_VertexIndex")) {
+         src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_VERTEXID, 0);
+         ureg_MOV(c->ureg, *dst, src);
+      } else {
+         goto out;
+      }
+      break;
+   }
    case nir_intrinsic_load_ubo: {
        nir_const_value *const_offset;
        struct ureg_src src;
@@ -768,12 +778,27 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
 	   int fine = const_offset->u[0] - ((const_offset->u[0]/16)*16);
 	   fprintf(stderr, "const is %d fine is %d\n", const_offset->u[0], fine);
 	   src = ureg_src_dimension(ureg_src_register(TGSI_FILE_CONSTANT, const_offset->u[0]/16), instr->const_index[0] + 1);
+
+           if (only_def) {
+              *dst = ureg_dst(src);
+           } else {
+              ureg_MOV(c->ureg, *dst, src);
+           }
+       } else {
+          struct ureg_dst temp = ureg_DECL_temporary(c->ureg);
+          unsigned value = 4;
+          if (!c->addr_declared) {
+             c->addr_reg = ureg_DECL_address(c->ureg);
+             c->addr_declared = true;
+          }
+          ureg_USHR(c->ureg, temp, ntt_get_src(c, instr->src[1]), ureg_DECL_immediate_uint(c->ureg, &value, 1));
+
+          ureg_UARL(c->ureg, c->addr_reg, ureg_src(temp));
+          ureg_MOV(c->ureg, *dst,
+                   ureg_src_dimension(ureg_src_indirect(ureg_src_register(TGSI_FILE_CONSTANT, 0), ureg_src(c->addr_reg)),
+                                      instr->const_index[0] + 1));
        }
-      if (only_def) {
-	  *dst = ureg_dst(src);
-      } else {
-	  ureg_MOV(c->ureg, *dst, src);
-      }
+
        break;
    }
    case nir_intrinsic_load_uniform: {
@@ -821,6 +846,20 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
    }
       break;
 
+   case nir_intrinsic_load_output: {
+      uint32_t index = instr->const_index[0];
+      struct ureg_src src = ureg_src_register(TGSI_FILE_OUTPUT,
+                                              c->output_index_map[index]);
+
+      //   assert(instr->const_index[1] == 1);
+
+      if (only_def) {
+         *dst = ureg_dst(src);
+      } else {
+         ureg_MOV(c->ureg, *dst, src);
+      }
+      break;
+   }
    case nir_intrinsic_store_output: {
       struct ureg_src src = ntt_get_src(c, instr->src[0]);
       uint32_t index = instr->const_index[0];
@@ -830,19 +869,23 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
 //      assert(instr->const_index[1] == 1);
 
       ureg_MOV(c->ureg, out, src);
-   }
       break;
-
+   }
    case nir_intrinsic_discard:
       ureg_KILL(c->ureg);
       break;
 
    default:
-      fprintf(stderr, "Unknown intrinsic: ");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
+      goto out;
       break;
    }
+
+   return;
+ out:
+   fprintf(stderr, "Unknown intrinsic: ");
+   nir_print_instr(&instr->instr, stderr);
+   fprintf(stderr, "\n");
+
 }
 
 static void
