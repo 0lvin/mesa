@@ -435,6 +435,9 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
          template.format = vk_format_to_pipe(cmd->u.begin_render_pass.render_pass->attachments[i].format);
          template.width = cmd->u.begin_render_pass.framebuffer->width;
          template.height = cmd->u.begin_render_pass.framebuffer->height;
+
+         if (template.format == PIPE_FORMAT_NONE)
+            return;
          imgv->surface = state->pctx->create_surface(state->pctx,
                                                      imgv->image->bo, &template);
       }
