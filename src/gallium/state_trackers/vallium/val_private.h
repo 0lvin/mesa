@@ -324,6 +324,7 @@ struct val_render_pass_attachment {
    uint32_t                                     samples;
    VkAttachmentLoadOp                           load_op;
    VkAttachmentLoadOp                           stencil_load_op;
+   VkImageLayout                                final_layout;
 };
 
 struct val_render_pass {

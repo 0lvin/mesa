@@ -429,7 +429,7 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
 
          memset(&template, 0, sizeof(struct pipe_surface));
 
-         template.format = vk_format_to_pipe(cmd->u.begin_render_pass.render_pass->attachments[0].format);
+         template.format = vk_format_to_pipe(cmd->u.begin_render_pass.render_pass->attachments[i].format);
          template.width = cmd->u.begin_render_pass.framebuffer->width;
          template.height = cmd->u.begin_render_pass.framebuffer->height;
          imgv->surface = state->pctx->create_surface(state->pctx,
@@ -448,18 +448,29 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
                                       &state->framebuffer);
 
    if (cmd->u.begin_render_pass.render_pass->attachment_count) {
-      if (cmd->u.begin_render_pass.render_pass->attachments[0].load_op == VK_ATTACHMENT_LOAD_OP_CLEAR) {
-         union pipe_color_union color;
-         const VkClearValue value = cmd->u.begin_render_pass.clear_values[0];
-         double dclear_val = value.depthStencil.depth;
-         uint32_t sclear_val = value.depthStencil.stencil;
-         color.ui[0] = value.color.uint32[0];
-         color.ui[1] = value.color.uint32[1];
-         color.ui[2] = value.color.uint32[2];
-         color.ui[3] = value.color.uint32[3];
-         state->pctx->clear(state->pctx,
-                            PIPE_CLEAR_COLOR,
-                            &color, dclear_val, sclear_val);
+      int i;
+
+      for (i = 0; i < cmd->u.begin_render_pass.render_pass->attachment_count; i++) {
+         if (cmd->u.begin_render_pass.render_pass->attachments[i].load_op == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+            union pipe_color_union color;
+            const VkClearValue value = cmd->u.begin_render_pass.clear_values[i];
+            double dclear_val = value.depthStencil.depth;
+            uint32_t sclear_val = value.depthStencil.stencil;
+
+            if (cmd->u.begin_render_pass.render_pass->attachments[i].final_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+               color.ui[0] = value.color.uint32[0];
+               color.ui[1] = value.color.uint32[1];
+               color.ui[2] = value.color.uint32[2];
+               color.ui[3] = value.color.uint32[3];
+               state->pctx->clear(state->pctx,
+                                  PIPE_CLEAR_COLOR,
+                                  &color, dclear_val, sclear_val);
+            } else if (cmd->u.begin_render_pass.render_pass->attachments[i].final_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+               state->pctx->clear(state->pctx,
+                                  PIPE_CLEAR_DEPTHSTENCIL,
+                                  &color, dclear_val, sclear_val);
+            }
+         }
       }
    }
    return VK_SUCCESS;

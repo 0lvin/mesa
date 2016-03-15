@@ -38,6 +38,7 @@ VkResult val_CreateRenderPass(
       att->samples = pCreateInfo->pAttachments[i].samples;
       att->load_op = pCreateInfo->pAttachments[i].loadOp;
       att->stencil_load_op = pCreateInfo->pAttachments[i].stencilLoadOp;
+      att->final_layout = pCreateInfo->pAttachments[i].finalLayout;
       // att->store_op = pCreateInfo->pAttachments[i].storeOp;
       // att->stencil_store_op = pCreateInfo->pAttachments[i].stencilStoreOp;
    }
