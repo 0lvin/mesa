@@ -161,35 +161,6 @@ static VkResult emit_state(struct rendering_state *state)
    return VK_SUCCESS;
 }
 
-static void *parse_fragment_shader(struct pipe_context *pctx,
-                                  const char *text)
-{
-   struct tgsi_token tokens[1024];
-   struct pipe_shader_state state;
-
-   if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens)))
-      return NULL;
-
-   memset(&state, 0, sizeof(state));
-   state.tokens = tokens;
-   return pctx->create_fs_state(pctx, &state);
-}
-
-static void *parse_vertex_shader(struct pipe_context *pctx,
-                                  const char *text)
-{
-   struct tgsi_token tokens[1024];
-   struct pipe_shader_state state;
-
-   if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens)))
-      return NULL;
-
-   memset(&state, 0, sizeof(state));
-   state.tokens = tokens;
-   return pctx->create_vs_state(pctx, &state);
-}
-
-
 static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
                                 struct rendering_state *state)
 {
