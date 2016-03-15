@@ -58,3 +58,22 @@ static inline unsigned vk_conv_topology(VkPrimitiveTopology topology)
       return 0;
    }
 }
+
+static inline unsigned vk_conv_wrap_mode(enum VkSamplerAddressMode addr_mode)
+{
+   switch (addr_mode) {
+   case VK_SAMPLER_ADDRESS_MODE_REPEAT:
+      return PIPE_TEX_WRAP_REPEAT;
+   case VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+      return PIPE_TEX_WRAP_MIRROR_REPEAT;
+   case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE:
+      return PIPE_TEX_WRAP_CLAMP_TO_EDGE;
+   case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER:
+      return PIPE_TEX_WRAP_CLAMP_TO_BORDER;
+   case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
+      return PIPE_TEX_WRAP_MIRROR_CLAMP_TO_EDGE;
+   default:
+      assert(0);
+      return 0;
+   }
+}

@@ -9,6 +9,8 @@
 #include "pipe/p_shader_tokens.h"
 #include "tgsi/tgsi_text.h"
 #include "tgsi/tgsi_parse.h"
+
+#include "util/u_sampler.h"
 struct rendering_state {
    struct pipe_context *pctx;
 
@@ -52,12 +54,21 @@ struct rendering_state {
    int num_ve;
    struct pipe_vertex_element ve[PIPE_MAX_ATTRIBS];
 
+   struct pipe_sampler_view *sv[PIPE_SHADER_TYPES][PIPE_MAX_SAMPLERS];
+   int num_sampler_views[PIPE_SHADER_TYPES];
+   struct pipe_sampler_state ss[PIPE_SHADER_TYPES][PIPE_MAX_SAMPLERS];
+   int num_sampler_states[PIPE_SHADER_TYPES];
+   bool sv_dirty[PIPE_SHADER_TYPES];
+   bool ss_dirty[PIPE_SHADER_TYPES];
+
+   void *ss_cso[PIPE_SHADER_TYPES][16];
    void *velems_cso;
    void *shader_cso[PIPE_SHADER_TYPES];
 };
 
 static VkResult emit_state(struct rendering_state *state)
 {
+   int sh;
    if (state->blend_dirty) {
       if (state->blend_handle)
          state->pctx->delete_blend_state(state->pctx, state->blend_handle);
@@ -115,6 +126,32 @@ static VkResult emit_state(struct rendering_state *state)
    if (state->constbuf_dirty[PIPE_SHADER_VERTEX]) {
       state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_VERTEX,
                                        1, state->const_buffer[PIPE_SHADER_VERTEX]);
+   }
+
+   for (sh = 0; sh < PIPE_SHADER_TYPES; sh++) {
+
+      if (!state->sv_dirty[sh])
+         continue;
+
+      state->pctx->set_sampler_views(state->pctx, sh, 0, state->num_sampler_views[sh],
+                                     state->sv[sh]);
+      state->sv_dirty[sh] = false;
+   }
+
+   for (sh = 0; sh < PIPE_SHADER_TYPES; sh++) {
+      void *ss[16] = { 0 };
+      int i;
+      if (!state->ss_dirty[sh])
+         continue;
+
+      for (i = 0; i < state->num_sampler_states[sh]; i++) {
+         if (state->ss_cso[sh][i])
+            ss[i] = state->ss_cso[sh][i];
+
+         state->ss_cso[sh][i] = state->pctx->create_sampler_state(state->pctx, &state->ss[sh][i]);
+      }
+
+      state->pctx->bind_sampler_states(state->pctx, sh, 0, state->num_sampler_states[sh], state->ss_cso[sh]);
    }
 
    if (state->vp_dirty) {
@@ -325,6 +362,8 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
    int i;
    int j;
    state->num_const_bufs = 0;
+   state->num_sampler_views[PIPE_SHADER_VERTEX] = 0;
+   state->num_sampler_views[PIPE_SHADER_FRAGMENT] = 0;
    for (i = 0; i < bds->count; i++) {
       const struct val_descriptor_set *set = bds->sets[i];
 
@@ -339,6 +378,34 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
             }
          }
          state->constbuf_dirty[sidx] = true;
+      }
+
+      if (set->layout->shader_stages & VK_SHADER_STAGE_FRAGMENT_BIT) {
+         int sidx = PIPE_SHADER_FRAGMENT;
+         if (set->descriptors[0].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            struct val_image_view *iv = set->descriptors->image_view;
+            struct val_sampler *samp = set->descriptors->sampler;
+            struct pipe_sampler_view templ;
+            state->ss[sidx][i].wrap_s = vk_conv_wrap_mode(samp->create_info.addressModeU);
+            state->ss[sidx][i].wrap_t = vk_conv_wrap_mode(samp->create_info.addressModeV);
+            state->ss[sidx][i].wrap_r = vk_conv_wrap_mode(samp->create_info.addressModeW);
+            state->ss[sidx][i].min_img_filter = PIPE_TEX_FILTER_NEAREST;
+            state->ss[sidx][i].min_lod = samp->create_info.minLod;
+            state->ss[sidx][i].max_lod = samp->create_info.maxLod;
+            state->ss[sidx][i].normalized_coords = !samp->create_info.unnormalizedCoordinates;
+
+            state->num_sampler_states[sidx]++;
+
+            u_sampler_view_default_template(&templ,
+                                            iv->image->bo,
+                                            vk_format_to_pipe(iv->format));
+
+            state->sv[sidx][i] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
+            state->ss_dirty[sidx] = true;
+            state->num_sampler_views[sidx]++;
+
+            state->sv_dirty[sidx] = true;
+         }
       }
    }
 

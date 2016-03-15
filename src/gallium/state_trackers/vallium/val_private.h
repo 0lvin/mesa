@@ -335,6 +335,7 @@ struct val_render_pass {
 };
 
 struct val_sampler {
+   VkSamplerCreateInfo create_info;
    uint32_t state[4];
 };
 

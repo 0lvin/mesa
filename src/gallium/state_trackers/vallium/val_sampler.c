@@ -15,6 +15,8 @@ VkResult val_CreateSampler(
                         VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!sampler)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   sampler->create_info = *pCreateInfo;
    *pSampler = val_sampler_to_handle(sampler);
 
    return VK_SUCCESS;
