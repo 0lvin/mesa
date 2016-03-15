@@ -482,6 +482,7 @@ struct val_cmd_pool {
 #define VAL_CMD_END_RENDER_PASS 5   
 #define VAL_CMD_DRAW 6
 #define VAL_CMD_DYN_SET_VIEWPORT 7
+#define VAL_CMD_COPY_IMAGE_TO_BUFFER 8
 
 struct val_cmd_bind_pipeline {
    VkPipelineBindPoint bind_point;
@@ -526,6 +527,14 @@ struct val_cmd_dyn_set_viewport {
    VkViewport viewports[16];
 };
 
+struct val_cmd_copy_image_to_buffer {
+   struct val_image *src;
+   struct val_buffer *dst;
+   VkImageLayout src_layout;
+   uint32_t region_count;
+   const VkBufferImageCopy *regions;
+};
+
 struct val_cmd_buffer_entry {
    struct list_head cmd_link;
    uint32_t cmd_type;
@@ -536,6 +545,7 @@ struct val_cmd_buffer_entry {
       struct val_cmd_begin_render_pass begin_render_pass;
       struct val_cmd_draw draw;
       struct val_cmd_dyn_set_viewport dyn_set_viewport;
+      struct val_cmd_copy_image_to_buffer img_to_buffer;
    } u;
 };
       

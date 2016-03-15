@@ -516,6 +516,36 @@ static VkResult handle_dyn_set_viewport(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
+                                            struct rendering_state *state)
+{
+   int i;
+   struct val_cmd_copy_image_to_buffer *copycmd = &cmd->u.img_to_buffer;
+   struct pipe_blit_info info;
+
+   memset(&info, 0, sizeof(info));
+
+   info.src.resource = copycmd->src->bo;
+   info.dst.resource = copycmd->dst->bo;
+
+   for (i = 0; i < copycmd->region_count; i++) {
+
+      info.src.level = copycmd->regions[i].imageSubresource.mipLevel;
+      info.src.box.x = copycmd->regions[i].imageOffset.x;
+      info.src.box.y = copycmd->regions[i].imageOffset.y;
+      info.src.box.z = copycmd->regions[i].imageOffset.z;
+      info.src.box.width = copycmd->regions[i].imageExtent.width;
+      info.src.box.height = copycmd->regions[i].imageExtent.height;
+      info.src.box.depth = copycmd->regions[i].imageExtent.depth;
+
+      info.dst.box = info.src.box;
+      info.mask = PIPE_MASK_RGBA;
+      state->pctx->blit(state->pctx, &info);
+   }
+
+   return VK_SUCCESS;
+}
+
 VkResult val_execute_cmds(struct val_device *device,
                           struct val_cmd_buffer *cmd_buffer)
 {
@@ -554,6 +584,9 @@ VkResult val_execute_cmds(struct val_device *device,
          break;
       case VAL_CMD_DYN_SET_VIEWPORT:
          handle_dyn_set_viewport(cmd, &state);
+         break;
+      case VAL_CMD_COPY_IMAGE_TO_BUFFER:
+         handle_copy_image_to_buffer(cmd, &state);
          break;
       }
    }
