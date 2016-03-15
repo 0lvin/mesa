@@ -921,6 +921,16 @@ ntt_emit_texture(struct ntt_compile *c, nir_tex_instr *instr)
    unsigned shadow_chan = 0, lod_chan = 0, proj_chan = 0;
    unsigned tex_opcode = TGSI_OPCODE_TEX;
 
+   switch (instr->op) {
+   case nir_texop_tex:
+   default:
+      tex_opcode = TGSI_OPCODE_TEX;
+      break;
+   case nir_texop_txf:
+      tex_opcode = TGSI_OPCODE_TXF;
+      break;
+   }
+
    for (i = 0; i < instr->num_srcs; i++) {
       struct ureg_src src = ntt_get_src(c, instr->src[i].src);
 
