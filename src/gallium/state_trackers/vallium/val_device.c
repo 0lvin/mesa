@@ -1038,3 +1038,23 @@ void val_DestroySemaphore(
     const VkAllocationCallbacks*                pAllocator)
 {
 }
+
+VkResult val_CreateEvent(
+    VkDevice                                    _device,
+    const VkEventCreateInfo*                    pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkEvent*                                    pEvent)
+{
+   VAL_FROM_HANDLE(val_device, device, _device);
+   struct val_event *event;
+
+}
+
+
+void val_DestroyEvent(
+    VkDevice                                    _device,
+    VkEvent                                     _event,
+    const VkAllocationCallbacks*                pAllocator)
+{
+
+}

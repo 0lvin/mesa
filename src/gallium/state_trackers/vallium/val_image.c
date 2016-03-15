@@ -127,3 +127,32 @@ void val_GetImageSubresourceLayout(
       assert(!"Invalid image aspect");
    }
 }
+
+VkResult
+val_CreateBufferView(VkDevice _device,
+                     const VkBufferViewCreateInfo *pCreateInfo,
+                     const VkAllocationCallbacks *pAllocator,
+                     VkBufferView *pView)
+{
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_buffer, buffer, pCreateInfo->buffer);
+   struct val_buffer_view *view;
+   view = val_alloc2(&device->alloc, pAllocator, sizeof(*view), 8,
+                     VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!view)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   *pView = val_buffer_view_to_handle(view);
+
+   return VK_SUCCESS;
+}
+
+void
+val_DestroyBufferView(VkDevice _device, VkBufferView bufferView,
+                      const VkAllocationCallbacks *pAllocator)
+{
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_buffer_view, view, bufferView);
+
+   val_free2(&device->alloc, pAllocator, view);
+}
