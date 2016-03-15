@@ -428,6 +428,7 @@ void val_GetPhysicalDeviceQueueFamilyProperties(
 
    *pQueueFamilyProperties = (VkQueueFamilyProperties) {
       .queueFlags = VK_QUEUE_GRAPHICS_BIT |
+      VK_QUEUE_COMPUTE_BIT |
                     VK_QUEUE_TRANSFER_BIT,
       .queueCount = 1,
       .timestampValidBits = 36, /* XXX: Real value here */
