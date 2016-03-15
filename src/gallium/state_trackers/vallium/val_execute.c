@@ -561,7 +561,9 @@ VkResult val_execute_cmds(struct val_device *device,
 
    if (!state.pctx)
       return VK_ERROR_INITIALIZATION_FAILED;
-   
+
+   state.blend_dirty = true;
+   state.dsa_dirty = true;
    /* create a gallium context */
    LIST_FOR_EACH_ENTRY(cmd, &cmd_buffer->cmds, cmd_link) {
       fprintf(stderr, "cmd type %d\n", cmd->cmd_type);
