@@ -17,6 +17,7 @@ AM_CPPFLAGS = \
 	-I$(srcdir)
 
 VALLIUM_SOURCES = \
+	val_blit.c \
 	val_device.c \
 	val_cmd_buffer.c \
 	val_descriptor_set.c \
@@ -28,6 +29,7 @@ VALLIUM_SOURCES = \
 	val_pipeline.c \
 	val_pipeline_cache.c \
 	val_sampler.c \
+	val_query.c \
 	val_wsi.c \
 	val_wsi_x11.c
 
