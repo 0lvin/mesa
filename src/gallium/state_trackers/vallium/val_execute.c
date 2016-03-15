@@ -416,6 +416,25 @@ static VkResult handle_draw(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static VkResult handle_dyn_set_viewport(struct val_cmd_buffer_entry *cmd,
+                                        struct rendering_state *state)
+{
+   int i;
+
+   for (i = 0; i < cmd->u.dyn_set_viewport.viewport_count; i++) {
+      int idx = i + cmd->u.dyn_set_viewport.first_viewport;
+      const VkViewport *vp = &cmd->u.dyn_set_viewport.viewports[i];
+      state->viewports[idx].scale[0] = vp->width / 2;
+      state->viewports[idx].scale[1] = vp->height / 2;
+      state->viewports[idx].scale[2] = 1.0;
+      state->viewports[idx].translate[0] = vp->x + vp->width / 2;
+      state->viewports[idx].translate[1] = vp->y + vp->height / 2;
+      state->viewports[idx].translate[2] = 0.0;
+   }
+   state->vp_dirty = true;
+   return VK_SUCCESS;
+}
+
 VkResult val_execute_cmds(struct val_device *device,
                           struct val_cmd_buffer *cmd_buffer)
 {
@@ -451,6 +470,9 @@ VkResult val_execute_cmds(struct val_device *device,
       case VAL_CMD_DRAW:
          emit_state(&state);
          handle_draw(cmd, &state);
+         break;
+      case VAL_CMD_DYN_SET_VIEWPORT:
+         handle_dyn_set_viewport(cmd, &state);
          break;
       }
    }

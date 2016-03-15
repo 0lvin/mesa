@@ -324,8 +324,21 @@ void val_CmdSetViewport(
     const VkViewport*                           pViewports)
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
+   int i;
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
 
+   cmd->cmd_type = VAL_CMD_DYN_SET_VIEWPORT;
 
+   cmd->u.dyn_set_viewport.first_viewport = firstViewport;
+   cmd->u.dyn_set_viewport.viewport_count = viewportCount;
+   for (i = 0; i < viewportCount; i++)
+      cmd->u.dyn_set_viewport.viewports[i] = pViewports[i];
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 
 void val_CmdSetScissor(

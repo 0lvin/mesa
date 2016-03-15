@@ -474,6 +474,7 @@ struct val_cmd_pool {
 #define VAL_CMD_BEGIN_RENDER_PASS 4
 #define VAL_CMD_END_RENDER_PASS 5   
 #define VAL_CMD_DRAW 6
+#define VAL_CMD_DYN_SET_VIEWPORT 7
 
 struct val_cmd_bind_pipeline {
    VkPipelineBindPoint bind_point;
@@ -512,6 +513,12 @@ struct val_cmd_draw {
    uint32_t first_instance;
 };
 
+struct val_cmd_dyn_set_viewport {
+   uint32_t first_viewport;
+   uint32_t viewport_count;
+   VkViewport viewports[16];
+};
+
 struct val_cmd_buffer_entry {
    struct list_head cmd_link;
    uint32_t cmd_type;
@@ -521,6 +528,7 @@ struct val_cmd_buffer_entry {
       struct val_cmd_bind_descriptor_sets descriptor_sets;
       struct val_cmd_begin_render_pass begin_render_pass;
       struct val_cmd_draw draw;
+      struct val_cmd_dyn_set_viewport dyn_set_viewport;
    } u;
 };
       
