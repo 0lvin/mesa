@@ -382,29 +382,32 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 
       if (set->layout->shader_stages & VK_SHADER_STAGE_FRAGMENT_BIT) {
          int sidx = PIPE_SHADER_FRAGMENT;
-         if (set->descriptors[0].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            struct val_image_view *iv = set->descriptors->image_view;
-            struct val_sampler *samp = set->descriptors->sampler;
-            struct pipe_sampler_view templ;
-            state->ss[sidx][i].wrap_s = vk_conv_wrap_mode(samp->create_info.addressModeU);
-            state->ss[sidx][i].wrap_t = vk_conv_wrap_mode(samp->create_info.addressModeV);
-            state->ss[sidx][i].wrap_r = vk_conv_wrap_mode(samp->create_info.addressModeW);
-            state->ss[sidx][i].min_img_filter = PIPE_TEX_FILTER_NEAREST;
-            state->ss[sidx][i].min_lod = samp->create_info.minLod;
-            state->ss[sidx][i].max_lod = samp->create_info.maxLod;
-            state->ss[sidx][i].normalized_coords = !samp->create_info.unnormalizedCoordinates;
+         int j;
+         for (j = 0; j < set->layout->binding_count; j++) {
+            if (set->descriptors[j].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+               struct val_image_view *iv = set->descriptors[j].image_view;
+               struct val_sampler *samp = set->descriptors[j].sampler;
+               struct pipe_sampler_view templ;
+               state->ss[sidx][i].wrap_s = vk_conv_wrap_mode(samp->create_info.addressModeU);
+               state->ss[sidx][i].wrap_t = vk_conv_wrap_mode(samp->create_info.addressModeV);
+               state->ss[sidx][i].wrap_r = vk_conv_wrap_mode(samp->create_info.addressModeW);
+               state->ss[sidx][i].min_img_filter = PIPE_TEX_FILTER_NEAREST;
+               state->ss[sidx][i].min_lod = samp->create_info.minLod;
+               state->ss[sidx][i].max_lod = samp->create_info.maxLod;
+               state->ss[sidx][i].normalized_coords = !samp->create_info.unnormalizedCoordinates;
 
-            state->num_sampler_states[sidx]++;
+               state->num_sampler_states[sidx]++;
 
-            u_sampler_view_default_template(&templ,
-                                            iv->image->bo,
-                                            vk_format_to_pipe(iv->format));
+               u_sampler_view_default_template(&templ,
+                                               iv->image->bo,
+                                               vk_format_to_pipe(iv->format));
 
-            state->sv[sidx][i] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
-            state->ss_dirty[sidx] = true;
-            state->num_sampler_views[sidx]++;
+               state->sv[sidx][i] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
+               state->ss_dirty[sidx] = true;
+               state->num_sampler_views[sidx]++;
 
-            state->sv_dirty[sidx] = true;
+               state->sv_dirty[sidx] = true;
+            }
          }
       }
    }
