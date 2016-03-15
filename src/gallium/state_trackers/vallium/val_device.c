@@ -883,7 +883,17 @@ VkResult val_CreateFence(
     const VkAllocationCallbacks*                pAllocator,
     VkFence*                                    pFence)
 {
+   VAL_FROM_HANDLE(val_device, device, _device);
+   struct val_fence *fence;
 
+   fence = val_alloc2(&device->alloc, pAllocator, sizeof(*fence), 8,
+                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (fence == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   *pFence = val_fence_to_handle(fence);
+
+   return VK_SUCCESS;
 }
 
 void val_DestroyFence(
@@ -891,7 +901,8 @@ void val_DestroyFence(
     VkFence                                     _fence,
     const VkAllocationCallbacks*                pAllocator)
 {
-
+   VAL_FROM_HANDLE(val_device, device, _device);
+   val_free2(&device->alloc, pAllocator, val_fence_from_handle(_fence));
 }
 
 VkResult val_ResetFences(
@@ -899,7 +910,7 @@ VkResult val_ResetFences(
     uint32_t                                    fenceCount,
     const VkFence*                              pFences)
 {
-
+   return VK_SUCCESS;
 }
 
 VkResult val_GetFenceStatus(
@@ -1049,6 +1060,7 @@ VkResult val_CreateEvent(
    VAL_FROM_HANDLE(val_device, device, _device);
    struct val_event *event;
 
+   return VK_SUCCESS;
 }
 
 

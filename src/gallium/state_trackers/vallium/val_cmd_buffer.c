@@ -400,3 +400,15 @@ void val_CmdSetStencilReference(
     uint32_t                                    reference)
 {
 }
+
+void val_CmdPushConstants(
+    VkCommandBuffer                             commandBuffer,
+    VkPipelineLayout                            layout,
+    VkShaderStageFlags                          stageFlags,
+    uint32_t                                    offset,
+    uint32_t                                    size,
+    const void*                                 pValues)
+{
+  VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+
+}

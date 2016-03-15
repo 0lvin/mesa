@@ -111,6 +111,7 @@ VAL_DEFINE_NONDISP_HANDLE_CASTS(val_pipeline_layout, VkPipelineLayout)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_render_pass, VkRenderPass)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_sampler, VkSampler)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_shader_module, VkShaderModule)
+VAL_DEFINE_NONDISP_HANDLE_CASTS(val_fence, VkFence);
 extern struct val_dispatch_table dtable;
 
 #define ICD_EXPORT PUBLIC
@@ -445,6 +446,10 @@ struct val_pipeline {
 
    void *pipeline_tgsi[MESA_SHADER_STAGES];
    VkGraphicsPipelineCreateInfo create_info;
+};
+
+struct val_fence {
+   bool signaled;
 };
 
 struct val_buffer {

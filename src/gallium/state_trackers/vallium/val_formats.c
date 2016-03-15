@@ -46,7 +46,7 @@ void val_GetPhysicalDeviceFormatProperties(
 {
    VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
    enum pipe_format pformat = vk_format_to_pipe(format);
-   int features = 0;
+   unsigned features = 0, buffer_features = 0;
    if (pformat == PIPE_FORMAT_NONE) {
      pFormatProperties->linearTilingFeatures = 0;
      pFormatProperties->optimalTilingFeatures = 0;
@@ -62,9 +62,15 @@ void val_GetPhysicalDeviceFormatProperties(
 
    if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
                                              PIPE_BUFFER, 0, PIPE_BIND_VERTEX_BUFFER)) {
-      features |= VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
+      buffer_features |= VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
    }
 
+   if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
+                                             PIPE_BUFFER, 0, PIPE_BIND_CONSTANT_BUFFER)) {
+      buffer_features |= VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT;
+   }
+
+   buffer_features = VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT;
    if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
                                              PIPE_TEXTURE_2D, 0, PIPE_BIND_SAMPLER_VIEW)) {
       features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
@@ -74,10 +80,13 @@ void val_GetPhysicalDeviceFormatProperties(
                                              PIPE_TEXTURE_2D, 0, PIPE_BIND_RENDER_TARGET)) {
       features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
       features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
+      features |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
    }
 
+   features |= VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
    pFormatProperties->linearTilingFeatures = features;
    pFormatProperties->optimalTilingFeatures = features;
+   pFormatProperties->bufferFeatures = buffer_features;
    return VK_SUCCESS;
 }
 
@@ -91,6 +100,8 @@ VkResult val_GetPhysicalDeviceImageFormatProperties(
     VkImageFormatProperties*                    pImageFormatProperties)
 {
      VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
+
+     return VK_SUCCESS;
 }
 
 void val_GetPhysicalDeviceSparseImageFormatProperties(

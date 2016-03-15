@@ -1032,6 +1032,8 @@ ntt_emit_texture(struct ntt_compile *c, nir_tex_instr *instr)
          }
       }
       break;
+   case GLSL_SAMPLER_DIM_BUF:
+      break;
    default:
       fprintf(stderr, "Unknown sampler dimensions: %d\n", instr->sampler_dim);
       abort();
