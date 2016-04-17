@@ -1,7 +1,7 @@
 #include "val_private.h"
 
 #include "glsl_types.h"
-#include "nir/spirv/nir_spirv.h"
+#include "spirv/nir_spirv.h"
 #include "nir/nir_to_tgsi.h"
 
 #include "tgsi/tgsi_parse.h"
