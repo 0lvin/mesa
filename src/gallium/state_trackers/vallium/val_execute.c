@@ -10,6 +10,8 @@
 #include "tgsi/tgsi_text.h"
 #include "tgsi/tgsi_parse.h"
 
+#include "util/u_format.h"
+#include "util/u_surface.h"
 #include "util/u_sampler.h"
 struct rendering_state {
    struct pipe_context *pctx;
@@ -496,25 +498,56 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
    int i;
    struct val_cmd_copy_image_to_buffer *copycmd = &cmd->u.img_to_buffer;
    struct pipe_blit_info info;
-
+   struct pipe_box box, dbox;
+   struct pipe_transfer *src_t, *dst_t;
+   void *src_data, *dst_data;
    memset(&info, 0, sizeof(info));
 
+   state->pctx->flush(state->pctx, NULL, 0);
    info.src.resource = copycmd->src->bo;
    info.dst.resource = copycmd->dst->bo;
 
    for (i = 0; i < copycmd->region_count; i++) {
 
       info.src.level = copycmd->regions[i].imageSubresource.mipLevel;
-      info.src.box.x = copycmd->regions[i].imageOffset.x;
-      info.src.box.y = copycmd->regions[i].imageOffset.y;
-      info.src.box.z = copycmd->regions[i].imageOffset.z;
-      info.src.box.width = copycmd->regions[i].imageExtent.width;
-      info.src.box.height = copycmd->regions[i].imageExtent.height;
-      info.src.box.depth = copycmd->regions[i].imageExtent.depth;
+      box.x = copycmd->regions[i].imageOffset.x;
+      box.y = copycmd->regions[i].imageOffset.y;
+      box.z = copycmd->regions[i].imageOffset.z;
+      box.width = copycmd->regions[i].imageExtent.width;
+      box.height = copycmd->regions[i].imageExtent.height;
+      box.depth = copycmd->regions[i].imageExtent.depth;
+      
+      src_data = state->pctx->transfer_map(state->pctx,
+                                           copycmd->src->bo,
+                                           copycmd->regions[i].imageSubresource.mipLevel,
+                                           PIPE_TRANSFER_READ,
+                                           &box,
+                                           &src_t);
 
-      info.dst.box = info.src.box;
-      info.mask = PIPE_MASK_RGBA;
-      state->pctx->blit(state->pctx, &info);
+      dbox.x = 0;
+      dbox.y = 0;
+      dbox.z = 0;
+      dbox.width = copycmd->dst->bo->width0;
+      dbox.height = 1;
+      dbox.depth = 1;
+      dst_data = state->pctx->transfer_map(state->pctx,
+                                           copycmd->dst->bo,
+                                           0,
+                                           PIPE_TRANSFER_WRITE,
+                                           &dbox,
+                                           &dst_t);
+
+      util_copy_rect(dst_data, copycmd->src->bo->format,
+                     copycmd->regions[i].bufferRowLength,
+                     0, 0,
+                     copycmd->regions[i].imageExtent.width,
+                     copycmd->regions[i].imageExtent.height,
+                     src_data, util_format_get_stride(copycmd->src->bo->format, copycmd->src->bo->width0),
+                     copycmd->regions[i].imageOffset.x,
+                     copycmd->regions[i].imageOffset.y);
+                     
+      state->pctx->transfer_unmap(state->pctx, src_t);
+      state->pctx->transfer_unmap(state->pctx, dst_t);
    }
 
    return VK_SUCCESS;
