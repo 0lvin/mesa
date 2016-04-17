@@ -775,9 +775,9 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
 
        const_offset = nir_src_as_const_value(instr->src[1]);
        if (const_offset) {
-	   int fine = const_offset->u[0] - ((const_offset->u[0]/16)*16);
-	   fprintf(stderr, "const is %d fine is %d\n", const_offset->u[0], fine);
-	   src = ureg_src_dimension(ureg_src_register(TGSI_FILE_CONSTANT, const_offset->u[0]/16), instr->const_index[0] + 1);
+	   int fine = const_offset->u32[0] - ((const_offset->u32[0]/16)*16);
+	   fprintf(stderr, "const is %d fine is %d\n", const_offset->u32[0], fine);
+	   src = ureg_src_dimension(ureg_src_register(TGSI_FILE_CONSTANT, const_offset->u32[0]/16), instr->const_index[0] + 1);
 
            if (only_def) {
               *dst = ureg_dst(src);
@@ -892,7 +892,7 @@ static void
 ntt_emit_load_const(struct ntt_compile *c, nir_load_const_instr *instr)
 {
    struct ureg_dst *decl = ralloc(c->def_ht, struct ureg_dst);
-   struct ureg_src imm = ureg_DECL_immediate_uint(c->ureg, instr->value.u,
+   struct ureg_src imm = ureg_DECL_immediate_uint(c->ureg, instr->value.u32,
                                                   instr->def.num_components);
 
    if (imm.SwizzleX == TGSI_SWIZZLE_X &&
