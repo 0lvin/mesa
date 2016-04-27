@@ -1191,6 +1191,9 @@ ntt_emit_if_as_conditional_discard(struct ntt_compile *c, nir_if *if_stmt)
    nir_instr *instr = nir_block_first_instr(block);
 
    nir_intrinsic_instr *discard = nir_instr_as_intrinsic(instr);
+
+   if (!discard)
+     return false;
    if (discard->intrinsic != nir_intrinsic_discard)
       return false;
 
@@ -1315,7 +1318,8 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
 
    /* Find the main function and emit the body. */
    nir_foreach_function(c->s, function) {
-      assert(strcmp(function->name, "main") == 0);
+     if (strcmp(function->name, "main"))
+       continue;
       assert(function->impl);
       ntt_emit_impl(c, function->impl);
       ureg_END(c->ureg);
