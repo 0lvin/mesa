@@ -23,6 +23,7 @@
 
 #include "compiler/nir/nir.h"
 #include "tgsi/tgsi_ureg.h"
+#include "pipe/p_state.h"
 #include "nir/nir_to_tgsi.h"
 
 struct ntt_compile {
@@ -45,6 +46,7 @@ struct ntt_compile {
     */
    unsigned *input_index_map;
    unsigned *output_index_map;
+  struct ureg_src images[PIPE_MAX_SHADER_IMAGES];
 };
 
 static void ntt_emit_cf_list(struct ntt_compile *c, struct exec_list *list);
@@ -266,8 +268,8 @@ ntt_setup_uniforms(struct ntt_compile *c)
 
 	if (var->data.image.format == GL_RGBA8)
 	  pformat = PIPE_FORMAT_R8G8B8A8_UNORM;
-	ureg_DECL_image(c->ureg, var->data.driver_location,
-			PIPE_TEXTURE_2D, pformat, false, false);
+	c->images[0] = ureg_DECL_image(c->ureg, var->data.driver_location,
+				       PIPE_TEXTURE_2D, pformat, false, false);
       } else {
 	for (i = 0; i < array_len ; i++) {
 	  ureg_DECL_constant(c->ureg, var->data.driver_location + i);
@@ -768,6 +770,11 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
 
        ureg_DECL_constant2D(c->ureg, 0, 11, set + 1);
        break;
+   }
+
+   case nir_intrinsic_image_size: {
+     ureg_RESQ(c->ureg, *dst, c->images[0]);
+     break;
    }
 
    case nir_intrinsic_load_work_group_id: {
