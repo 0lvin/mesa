@@ -58,6 +58,12 @@ void val_DestroyPipeline(
 
    if (pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT])
       tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT]);
+
+   if (pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE])
+      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE]);
+
+   if (pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY])
+      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY]);
    val_free2(&device->alloc, pAllocator, pipeline);
 }
 
@@ -459,6 +465,12 @@ val_graphics_pipeline_init(struct val_pipeline *pipeline,
          val_pipeline_compile(pipeline, module,
                               pCreateInfo->pStages[i].pName,
                               MESA_SHADER_FRAGMENT,
+                              pCreateInfo->pStages[i].pSpecializationInfo);
+         break;
+      case VK_SHADER_STAGE_GEOMETRY_BIT:
+         val_pipeline_compile(pipeline, module,
+                              pCreateInfo->pStages[i].pName,
+                              MESA_SHADER_GEOMETRY,
                               pCreateInfo->pStages[i].pSpecializationInfo);
          break;
       default:

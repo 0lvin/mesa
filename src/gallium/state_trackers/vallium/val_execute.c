@@ -209,6 +209,11 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
             state->shader_cso[PIPE_SHADER_VERTEX] = state->pctx->create_vs_state(state->pctx, &shstate);
             state->pctx->bind_vs_state(state->pctx, state->shader_cso[PIPE_SHADER_VERTEX]);
             break;
+	 case VK_SHADER_STAGE_GEOMETRY_BIT:
+            shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY];
+            state->shader_cso[PIPE_SHADER_GEOMETRY] = state->pctx->create_gs_state(state->pctx, &shstate);
+            state->pctx->bind_gs_state(state->pctx, state->shader_cso[PIPE_SHADER_GEOMETRY]);
+            break;
          default:
             assert(0);
             break;
@@ -344,6 +349,7 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
    state->num_const_bufs = 0;
    state->num_sampler_views[PIPE_SHADER_VERTEX] = 0;
    state->num_sampler_views[PIPE_SHADER_FRAGMENT] = 0;
+   state->num_sampler_views[PIPE_SHADER_GEOMETRY] = 0;
    for (i = 0; i < bds->count; i++) {
       const struct val_descriptor_set *set = bds->sets[i];
 
@@ -687,7 +693,9 @@ VkResult val_execute_cmds(struct val_device *device,
    if (state.shader_cso[PIPE_SHADER_VERTEX])
       state.pctx->delete_vs_state(state.pctx, state.shader_cso[PIPE_SHADER_VERTEX]);
    if (state.shader_cso[PIPE_SHADER_FRAGMENT])
-   state.pctx->delete_fs_state(state.pctx, state.shader_cso[PIPE_SHADER_FRAGMENT]);
+      state.pctx->delete_fs_state(state.pctx, state.shader_cso[PIPE_SHADER_FRAGMENT]);
+   if (state.shader_cso[PIPE_SHADER_GEOMETRY])
+      state.pctx->delete_gs_state(state.pctx, state.shader_cso[PIPE_SHADER_GEOMETRY]);
    state.pctx->destroy(state.pctx);
    return VK_SUCCESS;
 }

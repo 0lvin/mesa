@@ -205,6 +205,8 @@ ntt_setup_inputs(struct ntt_compile *c)
                                                 sample_loc, 0, 1);
 
          /* XXX: fs coord origin */
+      } else if (c->target == PIPE_SHADER_GEOMETRY) {
+
       } else {
          fprintf(stderr, "Unknown shader stage %d\n", c->target);
          abort();
