@@ -205,6 +205,7 @@ OP12(UMUL_HI)
 OP12(LOAD)
 OP12(STORE)
 
+OP11(RESQ)
 #undef OP00
 #undef OP01
 #undef OP10
