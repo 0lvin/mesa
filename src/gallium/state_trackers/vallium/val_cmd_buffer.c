@@ -412,3 +412,53 @@ void val_CmdPushConstants(
   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
 
 }
+
+void val_CmdBindIndexBuffer(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    _buffer,
+    VkDeviceSize                                offset,
+    VkIndexType                                 indexType)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
+   struct val_cmd_buffer_entry *cmd;
+   int i;
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+   cmd->cmd_type = VAL_CMD_BIND_INDEX_BUFFER;
+
+   cmd->u.index_buffer.buffer = val_buffer_from_handle(_buffer);
+   cmd->u.index_buffer.offset = offset;
+   cmd->u.index_buffer.index_type = indexType;
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
+}
+
+void val_CmdDrawIndexed(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    indexCount,
+    uint32_t                                    instanceCount,
+    uint32_t                                    firstIndex,
+    int32_t                                     vertexOffset,
+    uint32_t                                    firstInstance)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
+   int i;
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_DRAW_INDEXED;
+   cmd->u.draw_indexed.index_count = indexCount;
+   cmd->u.draw_indexed.instance_count = instanceCount;
+   cmd->u.draw_indexed.first_index = firstIndex;
+   cmd->u.draw_indexed.vertex_offset = vertexOffset;
+   cmd->u.draw_indexed.first_instance = firstInstance;
+
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
+}

@@ -26,6 +26,7 @@ struct rendering_state {
    bool vb_dirty;
    bool constbuf_dirty[PIPE_SHADER_TYPES];
    bool vp_dirty;
+   bool ib_dirty;
    struct pipe_draw_info info;
 
    struct pipe_framebuffer_state framebuffer;
@@ -159,6 +160,11 @@ static VkResult emit_state(struct rendering_state *state)
    if (state->vp_dirty) {
       state->pctx->set_viewport_states(state->pctx, 0, 1, state->viewports);
       state->vp_dirty = false;
+   }
+
+   if (state->ib_dirty) {
+      state->pctx->set_index_buffer(state->pctx, &state->index_buffer);
+      state->ib_dirty = false;
    }
    return VK_SUCCESS;
 }
@@ -465,6 +471,7 @@ static VkResult handle_end_render_pass(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_draw(struct val_cmd_buffer_entry *cmd,
                             struct rendering_state *state)
 {
+   state->info.indexed = false;
    state->info.start = cmd->u.draw.first_vertex;
    state->info.count = cmd->u.draw.vertex_count;
    state->info.start_instance = cmd->u.draw.first_instance;
@@ -553,6 +560,42 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static VkResult handle_draw_indexed(struct val_cmd_buffer_entry *cmd,
+				    struct rendering_state *state)
+{
+   state->info.indexed = true;
+   state->info.start = cmd->u.draw_indexed.first_index;
+   state->info.count = cmd->u.draw_indexed.index_count;
+   state->info.start_instance = cmd->u.draw_indexed.first_instance;
+   state->info.instance_count = cmd->u.draw_indexed.instance_count;
+   state->pctx->draw_vbo(state->pctx, &state->info);
+   return VK_SUCCESS;
+}
+
+static VkResult handle_index_buffer(struct val_cmd_buffer_entry *cmd,
+				    struct rendering_state *state)
+{
+   struct val_cmd_bind_index_buffer *ib = &cmd->u.index_buffer;
+   switch (ib->index_type) {
+   case VK_INDEX_TYPE_UINT16:
+      state->index_buffer.index_size = 2;
+      break;
+   case VK_INDEX_TYPE_UINT32:
+      state->index_buffer.index_size = 4;
+      break;
+   default:
+      break;
+   }
+   state->index_buffer.offset = ib->offset;
+   if (ib->buffer)
+      state->index_buffer.buffer = ib->buffer->bo;
+   else
+      state->index_buffer.buffer = NULL;
+   state->index_buffer.user_buffer = NULL;
+   state->ib_dirty = true;
+   return VK_SUCCESS;
+}
+
 VkResult val_execute_cmds(struct val_device *device,
                           struct val_cmd_buffer *cmd_buffer)
 {
@@ -597,6 +640,13 @@ VkResult val_execute_cmds(struct val_device *device,
       case VAL_CMD_COPY_IMAGE_TO_BUFFER:
          handle_copy_image_to_buffer(cmd, &state);
          break;
+      case VAL_CMD_DRAW_INDEXED:
+	 emit_state(&state);
+	 handle_draw_indexed(cmd, &state);
+	 break;
+      case VAL_CMD_BIND_INDEX_BUFFER:
+	 handle_index_buffer(cmd, &state);
+	 break;
       }
    }
 
