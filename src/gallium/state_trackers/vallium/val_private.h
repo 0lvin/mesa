@@ -444,8 +444,10 @@ struct val_pipeline {
    struct val_device *                          device;
    struct val_pipeline_layout *                 layout;
 
+   bool is_compute_pipeline;
    void *pipeline_tgsi[MESA_SHADER_STAGES];
-   VkGraphicsPipelineCreateInfo create_info;
+   VkGraphicsPipelineCreateInfo graphics_create_info;
+   VkComputePipelineCreateInfo compute_create_info;
 };
 
 struct val_fence {

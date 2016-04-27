@@ -182,8 +182,8 @@ deep_copy_dynamic_state(VkPipelineDynamicStateCreateInfo *dst,
 }
 
 static VkResult
-deep_copy_create_info(VkGraphicsPipelineCreateInfo *dst,
-                      const VkGraphicsPipelineCreateInfo *src)
+deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
+			       const VkGraphicsPipelineCreateInfo *src)
 {
    int i;
    VkResult result;
@@ -411,11 +411,11 @@ val_pipeline_compile(struct val_pipeline *pipeline,
 }
 
 static VkResult
-val_pipeline_init(struct val_pipeline *pipeline,
-                  struct val_device *device,
-                  struct val_pipeline_cache *cache,
-                  const VkGraphicsPipelineCreateInfo *pCreateInfo,
-                  const VkAllocationCallbacks *alloc)
+val_graphics_pipeline_init(struct val_pipeline *pipeline,
+			   struct val_device *device,
+			   struct val_pipeline_cache *cache,
+			   const VkGraphicsPipelineCreateInfo *pCreateInfo,
+			   const VkAllocationCallbacks *alloc)
 {
    VkResult result;
    if (alloc == NULL)
@@ -424,8 +424,8 @@ val_pipeline_init(struct val_pipeline *pipeline,
    pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
 
    /* recreate createinfo */
-   deep_copy_create_info(&pipeline->create_info, pCreateInfo);
-
+   deep_copy_graphics_create_info(&pipeline->graphics_create_info, pCreateInfo);
+   pipeline->is_compute_pipeline = false;
    for (uint32_t i = 0; i < pCreateInfo->stageCount; i++) {
       VAL_FROM_HANDLE(val_shader_module, module,
                       pCreateInfo->pStages[i].module);
@@ -472,8 +472,8 @@ val_graphics_pipeline_create(
    if (pipeline == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   result = val_pipeline_init(pipeline, device, cache, pCreateInfo,
-                              pAllocator);
+   result = val_graphics_pipeline_init(pipeline, device, cache, pCreateInfo,
+				       pAllocator);
    if (result != VK_SUCCESS) {
       val_free2(&device->alloc, pAllocator, pipeline);
       return result;

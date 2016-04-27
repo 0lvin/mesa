@@ -175,9 +175,9 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
    bool dynamic_state_viewport = false, dynamic_state_scissor = false;
 
-   if (pipeline->create_info.pDynamicState)
+   if (pipeline->graphics_create_info.pDynamicState)
    {
-      const VkPipelineDynamicStateCreateInfo *dyn = pipeline->create_info.pDynamicState;
+      const VkPipelineDynamicStateCreateInfo *dyn = pipeline->graphics_create_info.pDynamicState;
       int i;
       for (i = 0; i < dyn->dynamicStateCount; i++) {
          if (dyn->pDynamicStates[i] == VK_DYNAMIC_STATE_VIEWPORT)
@@ -189,8 +189,8 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
 
    {
       int i;
-      for (i = 0; i < pipeline->create_info.stageCount; i++) {
-         const VkPipelineShaderStageCreateInfo *sh = &pipeline->create_info.pStages[i];
+      for (i = 0; i < pipeline->graphics_create_info.stageCount; i++) {
+         const VkPipelineShaderStageCreateInfo *sh = &pipeline->graphics_create_info.pStages[i];
          void *shader;
 	 struct pipe_shader_state shstate;
 	 memset(&shstate, 0, sizeof(shstate));
@@ -215,8 +215,8 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       }
    }
    /* rasterization state */
-   if (pipeline->create_info.pRasterizationState) {
-      const VkPipelineRasterizationStateCreateInfo *rsc = pipeline->create_info.pRasterizationState;
+   if (pipeline->graphics_create_info.pRasterizationState) {
+      const VkPipelineRasterizationStateCreateInfo *rsc = pipeline->graphics_create_info.pRasterizationState;
       state->rs_state.depth_clip = rsc->depthClampEnable;
       state->rs_state.rasterizer_discard = rsc->rasterizerDiscardEnable;
       state->rs_state.front_ccw = (rsc->frontFace == VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -226,8 +226,8 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       state->rs_dirty = true;
    }
 
-   if (pipeline->create_info.pDepthStencilState) {
-      const VkPipelineDepthStencilStateCreateInfo *dsa = pipeline->create_info.pDepthStencilState;
+   if (pipeline->graphics_create_info.pDepthStencilState) {
+      const VkPipelineDepthStencilStateCreateInfo *dsa = pipeline->graphics_create_info.pDepthStencilState;
 
       state->dsa_state.depth.enabled = dsa->depthTestEnable;
       state->dsa_state.depth.writemask = dsa->depthWriteEnable;
@@ -261,8 +261,8 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       state->dsa_dirty = true;
    }
 
-   if (pipeline->create_info.pColorBlendState) {
-      const VkPipelineColorBlendStateCreateInfo *cb = pipeline->create_info.pColorBlendState;
+   if (pipeline->graphics_create_info.pColorBlendState) {
+      const VkPipelineColorBlendStateCreateInfo *cb = pipeline->graphics_create_info.pColorBlendState;
       int i;
       if (cb->attachmentCount > 1)
          state->blend_state.independent_blend_enable = true;
@@ -273,7 +273,7 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    }
 
    {
-      const VkPipelineVertexInputStateCreateInfo *vi = pipeline->create_info.pVertexInputState;
+      const VkPipelineVertexInputStateCreateInfo *vi = pipeline->graphics_create_info.pVertexInputState;
       int i;
 
       for (i = 0; i < vi->vertexBindingDescriptionCount; i++) {
@@ -291,14 +291,14 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
    }
 
    {
-      const VkPipelineInputAssemblyStateCreateInfo *ia = pipeline->create_info.pInputAssemblyState;
+      const VkPipelineInputAssemblyStateCreateInfo *ia = pipeline->graphics_create_info.pInputAssemblyState;
 
       state->info.mode = vk_conv_topology(ia->topology);
       state->info.primitive_restart = ia->primitiveRestartEnable;
    }
 
-   if (pipeline->create_info.pViewportState) {
-      const VkPipelineViewportStateCreateInfo *vpi= pipeline->create_info.pViewportState;
+   if (pipeline->graphics_create_info.pViewportState) {
+      const VkPipelineViewportStateCreateInfo *vpi= pipeline->graphics_create_info.pViewportState;
       int i;
 
       if (!dynamic_state_viewport) {
