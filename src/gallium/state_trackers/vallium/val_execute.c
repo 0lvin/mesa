@@ -29,6 +29,7 @@ struct rendering_state {
    bool ib_dirty;
    struct pipe_draw_info info;
 
+   struct pipe_grid_info dispatch_info;
    struct pipe_framebuffer_state framebuffer;
 
    struct pipe_blend_state blend_state;
@@ -596,6 +597,26 @@ static VkResult handle_index_buffer(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static VkResult handle_dispatch(struct val_cmd_buffer_entry *cmd,
+				struct rendering_state *state)
+{
+   state->dispatch_info.grid[0] = cmd->u.dispatch.x;
+   state->dispatch_info.grid[1] = cmd->u.dispatch.y;
+   state->dispatch_info.grid[2] = cmd->u.dispatch.z;
+   state->dispatch_info.indirect = NULL;
+   state->pctx->launch_grid(state->pctx, &state->dispatch_info);
+   return VK_SUCCESS;
+}
+
+static VkResult handle_dispatch_indirect(struct val_cmd_buffer_entry *cmd,
+					 struct rendering_state *state)
+{
+   state->dispatch_info.indirect = cmd->u.dispatch_indirect.buffer->bo;
+   state->dispatch_info.indirect_offset = cmd->u.dispatch_indirect.offset;
+   state->pctx->launch_grid(state->pctx, &state->dispatch_info);
+   return VK_SUCCESS;
+}
+
 VkResult val_execute_cmds(struct val_device *device,
                           struct val_cmd_buffer *cmd_buffer)
 {
@@ -646,6 +667,12 @@ VkResult val_execute_cmds(struct val_device *device,
 	 break;
       case VAL_CMD_BIND_INDEX_BUFFER:
 	 handle_index_buffer(cmd, &state);
+	 break;
+      case VAL_CMD_DISPATCH:
+	 handle_dispatch(cmd, &state);
+	 break;
+      case VAL_CMD_DISPATCH_INDIRECT:
+	 handle_dispatch_indirect(cmd, &state);
 	 break;
       }
    }

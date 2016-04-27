@@ -299,6 +299,24 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
    return VK_SUCCESS;
 }
 
+static VkResult
+deep_copy_compute_create_info(VkComputePipelineCreateInfo *dst,
+			      const VkComputePipelineCreateInfo *src)
+{
+   VkResult result;
+   dst->sType = src->sType;
+   dst->pNext = NULL;
+   dst->flags = src->flags;
+   dst->layout = src->layout;
+   dst->basePipelineHandle = src->basePipelineHandle;
+   dst->basePipelineIndex = src->basePipelineIndex;
+
+   result = deep_copy_shader_stage(&dst->stage, &src->stage);
+   if (result != VK_SUCCESS)
+     return result;
+   return VK_SUCCESS;
+}
+
 static inline unsigned
 st_shader_stage_to_ptarget(gl_shader_stage stage)
 {
@@ -515,6 +533,66 @@ VkResult val_CreateGraphicsPipelines(
 
 }
 
+static VkResult
+val_compute_pipeline_init(struct val_pipeline *pipeline,
+			  struct val_device *device,
+			  struct val_pipeline_cache *cache,
+			  const VkComputePipelineCreateInfo *pCreateInfo,
+			  const VkAllocationCallbacks *alloc)
+{
+   VkResult result;
+   VAL_FROM_HANDLE(val_shader_module, module,
+		   pCreateInfo->stage.module);
+   if (alloc == NULL)
+      alloc = &device->alloc;
+   pipeline->device = device;
+   pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
+
+   deep_copy_compute_create_info(&pipeline->compute_create_info, pCreateInfo);
+   pipeline->is_compute_pipeline = true;
+
+   val_pipeline_compile(pipeline, module,
+			pCreateInfo->stage.pName,
+			MESA_SHADER_COMPUTE,
+			pCreateInfo->stage.pSpecializationInfo);
+   return VK_SUCCESS;
+}
+
+static VkResult
+val_compute_pipeline_create(
+   VkDevice _device,
+   VkPipelineCache _cache,
+   const VkComputePipelineCreateInfo *pCreateInfo,
+   const VkAllocationCallbacks *pAllocator,
+   VkPipeline *pPipeline)
+{
+   VAL_FROM_HANDLE(val_device, device, _device);
+   VAL_FROM_HANDLE(val_pipeline_cache, cache, _cache);
+   struct val_pipeline *pipeline;
+   VkResult result;
+   uint32_t offset, length;
+
+   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
+
+   pipeline = val_alloc2(&device->alloc, pAllocator, sizeof(*pipeline), 8,
+                         VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (pipeline == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   result = val_compute_pipeline_init(pipeline, device, cache, pCreateInfo,
+				      pAllocator);
+   if (result != VK_SUCCESS) {
+      val_free2(&device->alloc, pAllocator, pipeline);
+      return result;
+   }
+
+//   if (cache == NULL)
+//      cache = &device->default_pipeline_cache;
+   *pPipeline = val_pipeline_to_handle(pipeline);
+
+   return VK_SUCCESS;
+}
+
 VkResult val_CreateComputePipelines(
     VkDevice                                    _device,
     VkPipelineCache                             pipelineCache,
@@ -523,8 +601,24 @@ VkResult val_CreateComputePipelines(
     const VkAllocationCallbacks*                pAllocator,
     VkPipeline*                                 pPipelines)
 {
-   return VK_SUCCESS;
+   VkResult result;;
+   unsigned i = 0;
 
+   for (; i < count; i++) {
+      result = val_compute_pipeline_create(_device,
+					   pipelineCache,
+					   &pCreateInfos[i],
+					   pAllocator, &pPipelines[i]);
+      if (result != VK_SUCCESS) {
+         for (unsigned j = 0; j < i; j++) {
+            val_DestroyPipeline(_device, pPipelines[j], pAllocator);
+         }
+
+         return result;
+      }
+   }
+
+   return VK_SUCCESS;
 }
 
 void val_CmdPipelineBarrier(

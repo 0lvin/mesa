@@ -487,6 +487,8 @@ struct val_cmd_pool {
 #define VAL_CMD_COPY_IMAGE_TO_BUFFER 8
 #define VAL_CMD_DRAW_INDEXED 9
 #define VAL_CMD_BIND_INDEX_BUFFER 10
+#define VAL_CMD_DISPATCH 11
+#define VAL_CMD_DISPATCH_INDIRECT 12
 
 struct val_cmd_bind_pipeline {
    VkPipelineBindPoint bind_point;
@@ -549,8 +551,19 @@ struct val_cmd_draw_indexed {
 
 struct val_cmd_bind_index_buffer {
    const struct val_buffer *buffer;
-   uint32_t offset;
+   VkDeviceSize offset;
    VkIndexType index_type;
+};
+
+struct val_cmd_dispatch {
+   uint32_t x;
+   uint32_t y;
+   uint32_t z;
+};
+
+struct val_cmd_dispatch_indirect {
+   const struct val_buffer *buffer;
+   VkDeviceSize offset;
 };
 
 struct val_cmd_buffer_entry {
@@ -566,6 +579,8 @@ struct val_cmd_buffer_entry {
       struct val_cmd_copy_image_to_buffer img_to_buffer;
       struct val_cmd_draw_indexed draw_indexed;
       struct val_cmd_bind_index_buffer index_buffer;
+      struct val_cmd_dispatch dispatch;
+      struct val_cmd_dispatch_indirect dispatch_indirect;
    } u;
 };
       

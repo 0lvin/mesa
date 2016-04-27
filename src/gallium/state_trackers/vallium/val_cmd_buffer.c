@@ -462,3 +462,47 @@ void val_CmdDrawIndexed(
 
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
+
+void val_CmdDispatch(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    x,
+    uint32_t                                    y,
+    uint32_t                                    z)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
+   int i;
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+
+   cmd->cmd_type = VAL_CMD_DISPATCH;
+   cmd->u.dispatch.x = x;
+   cmd->u.dispatch.y = y;
+   cmd->u.dispatch.z = z;
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
+
+}
+
+void val_CmdDispatchIndirect(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    _buffer,
+    VkDeviceSize                                offset)
+{
+   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
+   struct val_cmd_buffer_entry *cmd;
+   int i;
+   cmd = val_alloc(&cmd_buffer->pool->alloc,
+                             sizeof(*cmd),
+                             8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd)
+      return;
+   cmd->cmd_type = VAL_CMD_DISPATCH_INDIRECT;
+
+   cmd->u.dispatch_indirect.buffer = val_buffer_from_handle(_buffer);
+   cmd->u.dispatch_indirect.offset = offset;
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
+
+}
