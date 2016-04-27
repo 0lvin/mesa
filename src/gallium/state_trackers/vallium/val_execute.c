@@ -170,8 +170,27 @@ static VkResult emit_state(struct rendering_state *state)
    return VK_SUCCESS;
 }
 
-static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
-                                struct rendering_state *state)
+static VkResult handle_compute_pipeline(struct val_cmd_buffer_entry *cmd,
+					 struct rendering_state *state)
+{
+   struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
+   const VkPipelineShaderStageCreateInfo *sh = &pipeline->compute_create_info.stage;
+   void *shader;
+   struct pipe_compute_state shstate;
+   memset(&shstate, 0, sizeof(shstate));
+   VAL_FROM_HANDLE(val_shader_module, module,
+		   sh->module);
+
+   shstate.prog = (void *)pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE];
+   shstate.ir_type = PIPE_SHADER_IR_TGSI;
+
+   state->shader_cso[PIPE_SHADER_COMPUTE] = state->pctx->create_compute_state(state->pctx, &shstate);
+   state->pctx->bind_compute_state(state->pctx, state->shader_cso[PIPE_SHADER_COMPUTE]);
+   return VK_SUCCESS;
+}
+
+static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
+					 struct rendering_state *state)
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
    bool dynamic_state_viewport = false, dynamic_state_scissor = false;
@@ -321,6 +340,16 @@ static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
       }
    }
    return VK_SUCCESS;
+}
+
+static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
+                                struct rendering_state *state)
+{
+   struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
+   if (pipeline->is_compute_pipeline)
+      return handle_compute_pipeline(cmd, state);
+   else
+      return handle_graphics_pipeline(cmd, state);
 }
 
 static VkResult handle_vertex_buffers(struct val_cmd_buffer_entry *cmd,
@@ -688,6 +717,7 @@ VkResult val_execute_cmds(struct val_device *device,
    state.pctx->bind_vertex_elements_state(state.pctx, NULL);
    state.pctx->bind_vs_state(state.pctx, NULL);
    state.pctx->bind_fs_state(state.pctx, NULL);
+   state.pctx->bind_compute_state(state.pctx, NULL);
    if (state.velems_cso)
       state.pctx->delete_vertex_elements_state(state.pctx, state.velems_cso);
    if (state.shader_cso[PIPE_SHADER_VERTEX])
@@ -696,6 +726,9 @@ VkResult val_execute_cmds(struct val_device *device,
       state.pctx->delete_fs_state(state.pctx, state.shader_cso[PIPE_SHADER_FRAGMENT]);
    if (state.shader_cso[PIPE_SHADER_GEOMETRY])
       state.pctx->delete_gs_state(state.pctx, state.shader_cso[PIPE_SHADER_GEOMETRY]);
+
+   if (state.shader_cso[PIPE_SHADER_COMPUTE])
+      state.pctx->delete_compute_state(state.pctx, state.shader_cso[PIPE_SHADER_COMPUTE]);
    state.pctx->destroy(state.pctx);
    return VK_SUCCESS;
 }
