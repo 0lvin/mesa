@@ -172,10 +172,10 @@ ntt_setup_inputs(struct ntt_compile *c)
       unsigned loc;
       /* XXX: map loc slots to semantics */
 
-      if (c->target == TGSI_PROCESSOR_VERTEX) {
+      if (c->target == PIPE_SHADER_VERTEX) {
 	  loc = var->data.location - VERT_ATTRIB_GENERIC0;
 	  decl = ureg_DECL_vs_input(c->ureg, loc);
-      } else if (c->target == TGSI_PROCESSOR_FRAGMENT) {
+      } else if (c->target == PIPE_SHADER_FRAGMENT) {
          static const unsigned interpolation_map[] = {
             TGSI_INTERPOLATE_PERSPECTIVE, /* INTERP_QUALIFIER_NONE */
             TGSI_INTERPOLATE_PERSPECTIVE, /* INTERP_QUALIFIER_SMOOTH */
@@ -235,7 +235,7 @@ ntt_setup_outputs(struct ntt_compile *c)
       unsigned i;
       struct ureg_dst decl;
 
-      if (c->target == TGSI_PROCESSOR_VERTEX) {
+      if (c->target == PIPE_SHADER_VERTEX) {
 	  translate_semantic_attr(var->data.location, false,
 				  &semantic_name, &semantic_index);
       } else {

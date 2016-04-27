@@ -321,28 +321,6 @@ st_shader_stage_to_ptarget(gl_shader_stage stage)
    return PIPE_SHADER_VERTEX;
 }
 
-static inline unsigned
-st_shader_stage_to_tgsi_target(gl_shader_stage stage)
-{
-   switch (stage) {
-   case MESA_SHADER_VERTEX:
-      return TGSI_PROCESSOR_VERTEX;
-   case MESA_SHADER_FRAGMENT:
-      return TGSI_PROCESSOR_FRAGMENT;
-   case MESA_SHADER_GEOMETRY:
-      return PIPE_SHADER_GEOMETRY;
-   case MESA_SHADER_TESS_CTRL:
-      return PIPE_SHADER_TESS_CTRL;
-   case MESA_SHADER_TESS_EVAL:
-      return PIPE_SHADER_TESS_EVAL;
-   case MESA_SHADER_COMPUTE:
-      return PIPE_SHADER_COMPUTE;
-   }
-
-   assert(!"should not be reached");
-   return PIPE_SHADER_VERTEX;
-}
-
 static void *
 val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
                            struct val_shader_module *module,
@@ -411,7 +389,7 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
       } while (progress);
 
       nir_remove_dead_variables(nir, nir_var_local);
-      tgsi = nir_to_tgsi(nir, st_shader_stage_to_tgsi_target(stage));
+      tgsi = nir_to_tgsi(nir, st_shader_stage_to_ptarget(stage));
       if (tgsi)
          tgsi_dump(tgsi, 0);
 
