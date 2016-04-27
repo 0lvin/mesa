@@ -400,6 +400,7 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
 
       nir_opt_global_to_local(nir);
 
+      nir_lower_system_values(nir);
       nir_opt_constant_folding(nir);
       do {
          progress = false;

@@ -261,8 +261,17 @@ ntt_setup_uniforms(struct ntt_compile *c)
       unsigned array_len = MAX2(glsl_get_length(var->type), 1);
       unsigned i;
 
-      for (i = 0; i < array_len ; i++) {
-         ureg_DECL_constant(c->ureg, var->data.driver_location + i);
+      if (glsl_type_is_image(var->type)) {
+	enum pipe_format pformat = PIPE_FORMAT_NONE;
+
+	if (var->data.image.format == GL_RGBA8)
+	  pformat = PIPE_FORMAT_R8G8B8A8_UNORM;
+	ureg_DECL_image(c->ureg, var->data.driver_location,
+			PIPE_TEXTURE_2D, pformat, false, false);
+      } else {
+	for (i = 0; i < array_len ; i++) {
+	  ureg_DECL_constant(c->ureg, var->data.driver_location + i);
+	}
       }
    }
 }
@@ -761,6 +770,19 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
        break;
    }
 
+   case nir_intrinsic_load_work_group_id: {
+     struct ureg_src src;
+     src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_BLOCK_ID, 0);
+     ureg_MOV(c->ureg, *dst, src);
+     break;
+   }
+   case nir_intrinsic_load_local_invocation_id: {
+     struct ureg_src src;
+     src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_THREAD_ID, 0);
+     ureg_MOV(c->ureg, *dst, src);
+     break;
+   }
+
    case nir_intrinsic_load_var: {
       struct ureg_src src;
       if (!strcmp(instr->variables[0]->var->name, "gl_VertexIndex")) {
@@ -876,7 +898,19 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
    case nir_intrinsic_discard:
       ureg_KILL(c->ureg);
       break;
-
+   case nir_intrinsic_image_load: {
+     struct ureg_src src = ureg_src_register(TGSI_FILE_IMAGE, 0);
+     struct ureg_src src1 = ntt_get_src(c, instr->src[1]);
+     ureg_LOAD(c->ureg, *dst, src, src1);
+     break;
+   }
+   case nir_intrinsic_image_store: {
+     struct ureg_src src = ntt_get_src(c, instr->src[0]);
+     struct ureg_src src1 = ntt_get_src(c, instr->src[1]);
+     struct ureg_dst out = ureg_dst_register(TGSI_FILE_IMAGE, 0);
+     ureg_STORE(c->ureg, out, src, src1);
+     break;
+   }
    default:
       goto out;
       break;
