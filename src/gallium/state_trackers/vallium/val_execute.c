@@ -564,6 +564,8 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
 static VkResult handle_draw_indexed(struct val_cmd_buffer_entry *cmd,
 				    struct rendering_state *state)
 {
+   state->info.min_index = 0;
+   state->info.max_index = ~0;
    state->info.indexed = true;
    state->info.start = cmd->u.draw_indexed.first_index;
    state->info.count = cmd->u.draw_indexed.index_count;
