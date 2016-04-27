@@ -52,7 +52,7 @@ struct rendering_state {
    struct pipe_index_buffer index_buffer;
 
    struct pipe_constant_buffer const_buffer[PIPE_SHADER_TYPES][16];
-   int num_const_bufs;
+   int num_const_bufs[PIPE_SHADER_TYPES];
    int start_vb, num_vb;
    struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
    int num_ve;
@@ -64,6 +64,11 @@ struct rendering_state {
    int num_sampler_states[PIPE_SHADER_TYPES];
    bool sv_dirty[PIPE_SHADER_TYPES];
    bool ss_dirty[PIPE_SHADER_TYPES];
+
+   struct pipe_image_view iv[PIPE_SHADER_TYPES][PIPE_MAX_SHADER_IMAGES];
+   int num_shader_images[PIPE_SHADER_TYPES];
+   struct pipe_shader_buffer *sb[PIPE_SHADER_TYPES][PIPE_MAX_SHADER_BUFFERS];
+   int num_shader_buffers[PIPE_SHADER_TYPES];
 
    void *ss_cso[PIPE_SHADER_TYPES][16];
    void *velems_cso;
@@ -369,62 +374,124 @@ static VkResult handle_vertex_buffers(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static void handle_descriptor(struct rendering_state *state,
+			      int sidx,
+			      const struct val_descriptor *descriptor)
+{
+   switch (descriptor->type) {
+   case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
+      struct val_image_view *iv = descriptor->image_view;
+      int idx = state->num_shader_images[sidx];
+      state->iv[sidx][idx].resource = iv->image->bo;
+      state->iv[sidx][idx].format = vk_format_to_pipe(iv->format);
+      state->iv[sidx][idx].u.tex.first_layer = iv->subresourceRange.baseArrayLayer;
+      state->iv[sidx][idx].u.tex.last_layer = iv->subresourceRange.baseArrayLayer +
+	 iv->subresourceRange.layerCount;
+      state->iv[sidx][idx].u.tex.level = iv->subresourceRange.baseMipLevel;
+      state->num_shader_images[sidx]++;
+      break;
+   }
+   case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: {
+      int idx = state->num_const_bufs[sidx];
+      struct val_buffer_view *bv = descriptor->buffer_view;
+      state->const_buffer[sidx][idx].buffer = bv->bo;
+      state->const_buffer[sidx][idx].buffer_offset = bv->offset;
+      state->const_buffer[sidx][idx].buffer_size = bv->range;
+      state->num_const_bufs[sidx]++;
+      state->constbuf_dirty[sidx] = true;
+      break;
+   }
+   case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+      struct val_image_view *iv = descriptor->image_view;
+      struct val_sampler *samp = descriptor->sampler;
+      struct pipe_sampler_view templ;
+      int idx = state->num_sampler_states[sidx];
+      state->ss[sidx][idx].wrap_s = vk_conv_wrap_mode(samp->create_info.addressModeU);
+      state->ss[sidx][idx].wrap_t = vk_conv_wrap_mode(samp->create_info.addressModeV);
+      state->ss[sidx][idx].wrap_r = vk_conv_wrap_mode(samp->create_info.addressModeW);
+      state->ss[sidx][idx].min_img_filter = PIPE_TEX_FILTER_NEAREST;
+      state->ss[sidx][idx].min_lod = samp->create_info.minLod;
+      state->ss[sidx][idx].max_lod = samp->create_info.maxLod;
+      state->ss[sidx][idx].normalized_coords = !samp->create_info.unnormalizedCoordinates;
+
+      state->num_sampler_states[sidx]++;
+
+      u_sampler_view_default_template(&templ,
+				      iv->image->bo,
+				      vk_format_to_pipe(iv->format));
+      
+      state->sv[sidx][idx] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
+      state->ss_dirty[sidx] = true;
+      state->num_sampler_views[sidx]++;
+      state->sv_dirty[sidx] = true;
+      break;
+   }
+   }
+}
+
+static void handle_set_stage(struct rendering_state *state,
+			     const struct val_descriptor_set *set,
+			     int sidx)
+{
+   int j;
+   for (j = 0; j < set->layout->binding_count; j++) {
+      const struct val_descriptor_set_binding_layout *binding;
+      const struct val_descriptor *descriptor;
+      binding = &set->layout->binding[j];
+
+      if (binding->descriptor_index != -1) {
+	 descriptor = &set->descriptors[binding->descriptor_index];
+	 handle_descriptor(state, sidx, descriptor);
+      }
+   }
+}
+
+static VkResult handle_compute_descriptor_sets(struct val_cmd_buffer_entry *cmd,
+					       struct rendering_state *state)
+{
+   struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
+   int i, j;
+   for (i = 0; i < bds->count; i++) {
+      const struct val_descriptor_set *set = bds->sets[i];
+
+      if (set->layout->shader_stages & VK_SHADER_STAGE_COMPUTE_BIT)
+	 handle_set_stage(state, set, PIPE_SHADER_COMPUTE);
+   }
+
+   state->pctx->set_shader_images(state->pctx, PIPE_SHADER_COMPUTE,
+				  0, state->num_shader_images[PIPE_SHADER_COMPUTE],
+				  state->iv[PIPE_SHADER_COMPUTE]);
+
+   state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_COMPUTE,
+				    1, state->const_buffer[PIPE_SHADER_COMPUTE]);
+   return VK_SUCCESS;
+}
+
 static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
                                        struct rendering_state *state)
 {
    struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
    int i;
    int j;
-   state->num_const_bufs = 0;
+
+   if (bds->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
+      return handle_compute_descriptor_sets(cmd, state);
+   
+   state->num_const_bufs[PIPE_SHADER_VERTEX] = 0;
    state->num_sampler_views[PIPE_SHADER_VERTEX] = 0;
    state->num_sampler_views[PIPE_SHADER_FRAGMENT] = 0;
    state->num_sampler_views[PIPE_SHADER_GEOMETRY] = 0;
    for (i = 0; i < bds->count; i++) {
       const struct val_descriptor_set *set = bds->sets[i];
 
-      if (set->layout->shader_stages & VK_SHADER_STAGE_VERTEX_BIT) {
-         int sidx = PIPE_SHADER_VERTEX;
-         for (j = 0; j < set->buffer_count; j++) {
-            int idx = state->num_const_bufs;
-            if (set->descriptors[j].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-               state->const_buffer[sidx][idx].buffer = set->buffer_views->bo;
-               state->const_buffer[sidx][idx].buffer_offset = set->buffer_views->offset;
-               state->const_buffer[sidx][idx].buffer_size = set->buffer_views->range;
-            }
-         }
-         state->constbuf_dirty[sidx] = true;
-      }
+      if (set->layout->shader_stages & VK_SHADER_STAGE_VERTEX_BIT)
+	 handle_set_stage(state, set, PIPE_SHADER_VERTEX);
 
-      if (set->layout->shader_stages & VK_SHADER_STAGE_FRAGMENT_BIT) {
-         int sidx = PIPE_SHADER_FRAGMENT;
-         int j;
-         for (j = 0; j < set->layout->binding_count; j++) {
-            if (set->descriptors[j].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-               struct val_image_view *iv = set->descriptors[j].image_view;
-               struct val_sampler *samp = set->descriptors[j].sampler;
-               struct pipe_sampler_view templ;
-               state->ss[sidx][i].wrap_s = vk_conv_wrap_mode(samp->create_info.addressModeU);
-               state->ss[sidx][i].wrap_t = vk_conv_wrap_mode(samp->create_info.addressModeV);
-               state->ss[sidx][i].wrap_r = vk_conv_wrap_mode(samp->create_info.addressModeW);
-               state->ss[sidx][i].min_img_filter = PIPE_TEX_FILTER_NEAREST;
-               state->ss[sidx][i].min_lod = samp->create_info.minLod;
-               state->ss[sidx][i].max_lod = samp->create_info.maxLod;
-               state->ss[sidx][i].normalized_coords = !samp->create_info.unnormalizedCoordinates;
+      if (set->layout->shader_stages & VK_SHADER_STAGE_FRAGMENT_BIT)
+	 handle_set_stage(state, set, PIPE_SHADER_FRAGMENT);
 
-               state->num_sampler_states[sidx]++;
-
-               u_sampler_view_default_template(&templ,
-                                               iv->image->bo,
-                                               vk_format_to_pipe(iv->format));
-
-               state->sv[sidx][i] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
-               state->ss_dirty[sidx] = true;
-               state->num_sampler_views[sidx]++;
-
-               state->sv_dirty[sidx] = true;
-            }
-         }
-      }
+      if (set->layout->shader_stages & VK_SHADER_STAGE_GEOMETRY_BIT)
+	 handle_set_stage(state, set, PIPE_SHADER_GEOMETRY);
    }
 
    return VK_SUCCESS;
