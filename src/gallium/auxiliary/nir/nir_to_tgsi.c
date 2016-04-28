@@ -265,11 +265,13 @@ ntt_setup_uniforms(struct ntt_compile *c)
 
       if (glsl_type_is_image(var->type)) {
 	enum pipe_format pformat = PIPE_FORMAT_NONE;
-
-	if (var->data.image.format == GL_RGBA8)
-	  pformat = PIPE_FORMAT_R8G8B8A8_UNORM;
+	boolean raw = FALSE;
+	if (var->data.image.format == GL_NONE)
+	   raw = TRUE;
+	else if (var->data.image.format == GL_RGBA8)
+	   pformat = PIPE_FORMAT_R8G8B8A8_UNORM;
 	c->images[var->data.binding] = ureg_DECL_image(c->ureg, var->data.binding,
-						       PIPE_TEXTURE_2D, pformat, false, false);
+						       TGSI_TEXTURE_2D, pformat, !var->data.read_only, raw);
       } else {
 	for (i = 0; i < array_len ; i++) {
 	  ureg_DECL_constant(c->ureg, var->data.driver_location + i);
