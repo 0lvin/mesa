@@ -1320,7 +1320,8 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    nir_lower_locals_to_regs(s);
    nir_print_shader(s, stdout);
 
-   if (s->stage == MESA_SHADER_VERTEX) {
+   if (s->stage == MESA_SHADER_VERTEX ||
+       s->stage == MESA_SHADER_FRAGMENT) {
       foreach_list_typed(nir_variable, var, node, &s->inputs) {
          var->data.driver_location = var->data.location;
       }
