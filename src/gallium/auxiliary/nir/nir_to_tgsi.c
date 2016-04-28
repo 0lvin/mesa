@@ -807,16 +807,16 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
      ureg_MOV(c->ureg, *dst, src);
      break;
    }
+   case nir_intrinsic_load_vertex_id: {
+     struct ureg_src src;
+     src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_VERTEXID, 0);
+     ureg_MOV(c->ureg, *dst, src);
+     break;
+   }
 
    case nir_intrinsic_load_var: {
-      struct ureg_src src;
-      if (!strcmp(instr->variables[0]->var->name, "gl_VertexIndex")) {
-         src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_VERTEXID, 0);
-         ureg_MOV(c->ureg, *dst, src);
-      } else {
-         goto out;
-      }
-      break;
+     goto out;
+
    }
    case nir_intrinsic_load_ubo: {
        nir_const_value *const_offset;
