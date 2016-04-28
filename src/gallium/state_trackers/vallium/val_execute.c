@@ -678,7 +678,7 @@ static VkResult handle_copy_image(struct val_cmd_buffer_entry *cmd,
       info.src.level = copycmd->regions[i].srcSubresource.mipLevel;
       info.src.box.x = copycmd->regions[i].srcOffset.x;
       info.src.box.y = copycmd->regions[i].srcOffset.y;
-      info.src.box.z = copycmd->regions[i].srcOffset.z;
+      info.src.box.z = copycmd->regions[i].srcOffset.z + copycmd->regions[i].srcSubresource.baseArrayLayer;
       info.src.box.width = copycmd->regions[i].extent.width;
       info.src.box.height = copycmd->regions[i].extent.height;
       info.src.box.depth = copycmd->regions[i].extent.depth;
@@ -686,7 +686,7 @@ static VkResult handle_copy_image(struct val_cmd_buffer_entry *cmd,
       info.dst.level = copycmd->regions[i].dstSubresource.mipLevel;
       info.dst.box.x = copycmd->regions[i].dstOffset.x;
       info.dst.box.y = copycmd->regions[i].dstOffset.y;
-      info.dst.box.z = copycmd->regions[i].dstOffset.z;
+      info.dst.box.z = copycmd->regions[i].dstOffset.z + copycmd->regions[i].dstSubresource.baseArrayLayer;
       info.dst.box.width = copycmd->regions[i].extent.width;
       info.dst.box.height = copycmd->regions[i].extent.height;
       info.dst.box.depth = copycmd->regions[i].extent.depth;
