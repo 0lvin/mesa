@@ -1345,6 +1345,16 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
                                        _mesa_hash_pointer,
                                        _mesa_key_pointer_equal);
 
+   if (s->stage == MESA_SHADER_COMPUTE) {
+      ureg_property(c->ureg, TGSI_PROPERTY_CS_FIXED_BLOCK_WIDTH,
+		    s->info.cs.local_size[0]);
+      ureg_property(c->ureg, TGSI_PROPERTY_CS_FIXED_BLOCK_HEIGHT,
+		    s->info.cs.local_size[1]);
+      ureg_property(c->ureg, TGSI_PROPERTY_CS_FIXED_BLOCK_DEPTH,
+		    s->info.cs.local_size[2]);
+   }
+
+
    ntt_setup_inputs(c);
    ntt_setup_outputs(c);
    ntt_setup_uniforms(c);
