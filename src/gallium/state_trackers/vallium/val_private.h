@@ -604,6 +604,7 @@ struct val_cmd_buffer {
    struct list_head                             pool_link;
 
    struct list_head                             cmds;
+   struct pipe_context *ctx;
 };
 
 VkResult val_execute_cmds(struct val_device *device,

@@ -1,5 +1,5 @@
 #include "val_private.h"
-
+#include "pipe/p_context.h"
 static VkResult val_create_cmd_buffer(
     struct val_device *                         device,
     struct val_cmd_pool *                       pool,
@@ -17,7 +17,7 @@ static VkResult val_create_cmd_buffer(
    cmd_buffer->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
    cmd_buffer->device = device;
    cmd_buffer->pool = pool;
-
+   cmd_buffer->ctx = NULL;
    list_inithead(&cmd_buffer->cmds);
    if (pool) {
       list_addtail(&cmd_buffer->pool_link, &pool->cmd_buffers);
@@ -60,6 +60,8 @@ VkResult val_AllocateCommandBuffers(
 static void
 val_cmd_buffer_destroy(struct val_cmd_buffer *cmd_buffer)
 {
+   if (cmd_buffer->ctx)
+      cmd_buffer->ctx->destroy(cmd_buffer->ctx);
    list_del(&cmd_buffer->pool_link);
    val_free(&cmd_buffer->pool->alloc, cmd_buffer);
 }

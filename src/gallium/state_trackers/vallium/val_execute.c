@@ -761,13 +761,14 @@ VkResult val_execute_cmds(struct val_device *device,
    struct val_cmd_buffer_entry *cmd;
    struct rendering_state state;
 
-   memset(&state, 0, sizeof(state));
-   state.pctx = device->pscreen->context_create(device->pscreen,
-                                                NULL, PIPE_CONTEXT_ROBUST_BUFFER_ACCESS);
-
-   if (!state.pctx)
+   if (!cmd_buffer->ctx)
+      cmd_buffer->ctx = device->pscreen->context_create(device->pscreen,
+							NULL, PIPE_CONTEXT_ROBUST_BUFFER_ACCESS);
+   if (!cmd_buffer->ctx)
       return VK_ERROR_INITIALIZATION_FAILED;
 
+   memset(&state, 0, sizeof(state));
+   state.pctx = cmd_buffer->ctx;
    state.blend_dirty = true;
    state.dsa_dirty = true;
    /* create a gallium context */
@@ -833,6 +834,5 @@ VkResult val_execute_cmds(struct val_device *device,
 
    if (state.shader_cso[PIPE_SHADER_COMPUTE])
       state.pctx->delete_compute_state(state.pctx, state.shader_cso[PIPE_SHADER_COMPUTE]);
-   state.pctx->destroy(state.pctx);
    return VK_SUCCESS;
 }
