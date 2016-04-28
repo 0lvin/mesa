@@ -35,6 +35,8 @@ static enum pipe_format format_to_vk_table[VK_FORMAT_END_RANGE] = {
    [VK_FORMAT_D32_SFLOAT_S8_UINT] = PIPE_FORMAT_Z32_FLOAT_S8X24_UINT,
    [VK_FORMAT_R32G32B32_SFLOAT] = PIPE_FORMAT_R32G32B32_FLOAT,
    [VK_FORMAT_R32G32B32A32_SFLOAT] = PIPE_FORMAT_R32G32B32A32_FLOAT,
+
+   [VK_FORMAT_BC3_UNORM_BLOCK] = PIPE_FORMAT_DXT5_RGBA,
 };
 
 enum pipe_format vk_format_to_pipe(VkFormat format)
@@ -63,6 +65,17 @@ void val_GetPhysicalDeviceFormatProperties(
       return;
    }
 
+   if (util_format_is_compressed(pformat)) {
+      if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
+							PIPE_TEXTURE_2D, 0, PIPE_BIND_SAMPLER_VIEW)) {
+	 features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+	 features |= VK_FORMAT_FEATURE_BLIT_SRC_BIT;
+	 features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+      }
+      pFormatProperties->linearTilingFeatures = features;
+      pFormatProperties->optimalTilingFeatures = features;
+      return VK_SUCCESS;
+   }
    if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
                                              PIPE_BUFFER, 0, PIPE_BIND_VERTEX_BUFFER)) {
       buffer_features |= VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
