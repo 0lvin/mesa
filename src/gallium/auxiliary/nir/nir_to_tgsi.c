@@ -938,16 +938,21 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       ureg_KILL(c->ureg);
       break;
    case nir_intrinsic_image_load: {
-     struct ureg_src src = ureg_src_register(TGSI_FILE_IMAGE, instr->variables[0]->var->data.binding);
-     struct ureg_src src1 = ntt_get_src(c, instr->src[0]);
-     ureg_LOAD(c->ureg, *dst, src, src1);
+      struct ureg_src src[2];
+
+      src[0] = ureg_src_register(TGSI_FILE_IMAGE, instr->variables[0]->var->data.binding);
+      src[1] = ntt_get_src(c, instr->src[0]);
+      ureg_memory_insn(c->ureg, TGSI_OPCODE_LOAD, dst, 1, src, 2,
+		       0, TGSI_TEXTURE_2D, PIPE_FORMAT_R8G8B8A8_UNORM);
      break;
    }
    case nir_intrinsic_image_store: {
-     struct ureg_src src = ntt_get_src(c, instr->src[0]);
-     struct ureg_src src1 = ntt_get_src(c, instr->src[2]);
+      struct ureg_src src[2];
+      src[0] = ntt_get_src(c, instr->src[0]);
+      src[1] = ntt_get_src(c, instr->src[2]);
      struct ureg_dst out = ureg_dst_register(TGSI_FILE_IMAGE, instr->variables[0]->var->data.binding);
-     ureg_STORE(c->ureg, out, src, src1);
+     ureg_memory_insn(c->ureg, TGSI_OPCODE_STORE, &out, 1, src, 2, 0,
+		      TGSI_TEXTURE_2D, PIPE_FORMAT_R8G8B8A8_UNORM);
      break;
    }
    default:
