@@ -46,7 +46,7 @@ struct ntt_compile {
     */
    unsigned *input_index_map;
    unsigned *output_index_map;
-  struct ureg_src images[PIPE_MAX_SHADER_IMAGES];
+   struct ureg_src images[PIPE_MAX_SHADER_IMAGES];
 };
 
 static void ntt_emit_cf_list(struct ntt_compile *c, struct exec_list *list);
@@ -268,8 +268,8 @@ ntt_setup_uniforms(struct ntt_compile *c)
 
 	if (var->data.image.format == GL_RGBA8)
 	  pformat = PIPE_FORMAT_R8G8B8A8_UNORM;
-	c->images[0] = ureg_DECL_image(c->ureg, var->data.driver_location,
-				       PIPE_TEXTURE_2D, pformat, false, false);
+	c->images[var->data.binding] = ureg_DECL_image(c->ureg, var->data.binding,
+						       PIPE_TEXTURE_2D, pformat, false, false);
       } else {
 	for (i = 0; i < array_len ; i++) {
 	  ureg_DECL_constant(c->ureg, var->data.driver_location + i);
@@ -936,15 +936,15 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
       ureg_KILL(c->ureg);
       break;
    case nir_intrinsic_image_load: {
-     struct ureg_src src = ureg_src_register(TGSI_FILE_IMAGE, 0);
-     struct ureg_src src1 = ntt_get_src(c, instr->src[1]);
+     struct ureg_src src = ureg_src_register(TGSI_FILE_IMAGE, instr->variables[0]->var->data.binding);
+     struct ureg_src src1 = ntt_get_src(c, instr->src[0]);
      ureg_LOAD(c->ureg, *dst, src, src1);
      break;
    }
    case nir_intrinsic_image_store: {
      struct ureg_src src = ntt_get_src(c, instr->src[0]);
-     struct ureg_src src1 = ntt_get_src(c, instr->src[1]);
-     struct ureg_dst out = ureg_dst_register(TGSI_FILE_IMAGE, 0);
+     struct ureg_src src1 = ntt_get_src(c, instr->src[2]);
+     struct ureg_dst out = ureg_dst_register(TGSI_FILE_IMAGE, instr->variables[0]->var->data.binding);
      ureg_STORE(c->ureg, out, src, src1);
      break;
    }
