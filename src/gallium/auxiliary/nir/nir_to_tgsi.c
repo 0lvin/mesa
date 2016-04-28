@@ -813,6 +813,18 @@ ntt_emit_intrinsic(struct ntt_compile *c, nir_intrinsic_instr *instr)
      ureg_MOV(c->ureg, *dst, src);
      break;
    }
+   case nir_intrinsic_load_base_instance: {
+     struct ureg_src src;
+     src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_BASEINSTANCE, 0);
+     ureg_MOV(c->ureg, *dst, src);
+     break;
+   }
+   case nir_intrinsic_load_instance_id: {
+     struct ureg_src src;
+     src = ureg_DECL_system_value(c->ureg, TGSI_SEMANTIC_INSTANCEID, 0);
+     ureg_MOV(c->ureg, *dst, src);
+     break;
+   }
 
    case nir_intrinsic_load_var: {
      goto out;
