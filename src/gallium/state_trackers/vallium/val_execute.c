@@ -180,11 +180,8 @@ static VkResult handle_compute_pipeline(struct val_cmd_buffer_entry *cmd,
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
    const VkPipelineShaderStageCreateInfo *sh = &pipeline->compute_create_info.stage;
-   void *shader;
    struct pipe_compute_state shstate;
    memset(&shstate, 0, sizeof(shstate));
-   VAL_FROM_HANDLE(val_shader_module, module,
-		   sh->module);
 
    shstate.prog = (void *)pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE];
    shstate.ir_type = PIPE_SHADER_IR_TGSI;
@@ -216,15 +213,11 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
       int i;
       for (i = 0; i < pipeline->graphics_create_info.stageCount; i++) {
          const VkPipelineShaderStageCreateInfo *sh = &pipeline->graphics_create_info.pStages[i];
-         void *shader;
 	 struct pipe_shader_state shstate;
 	 memset(&shstate, 0, sizeof(shstate));
-	 VAL_FROM_HANDLE(val_shader_module, module,
-			 sh->module);
          switch (sh->stage) {
          case VK_SHADER_STAGE_FRAGMENT_BIT:
             shstate.tokens = pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT];
-
 	    state->shader_cso[PIPE_SHADER_FRAGMENT] = state->pctx->create_fs_state(state->pctx, &shstate);
             state->pctx->bind_fs_state(state->pctx, state->shader_cso[PIPE_SHADER_FRAGMENT]);
             break;
@@ -426,6 +419,9 @@ static void handle_descriptor(struct rendering_state *state,
       state->sv_dirty[sidx] = true;
       break;
    }
+   default:
+     fprintf(stderr, "Unhandled descriptor set %d\n", descriptor->type);
+     break;
    }
 }
 
@@ -450,7 +446,7 @@ static VkResult handle_compute_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 					       struct rendering_state *state)
 {
    struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
-   int i, j;
+   int i;
    for (i = 0; i < bds->count; i++) {
       const struct val_descriptor_set *set = bds->sets[i];
 
@@ -472,7 +468,6 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 {
    struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
    int i;
-   int j;
 
    if (bds->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
       return handle_compute_descriptor_sets(cmd, state);
