@@ -53,7 +53,8 @@ struct rendering_state {
 
    struct pipe_constant_buffer const_buffer[PIPE_SHADER_TYPES][16];
    int num_const_bufs[PIPE_SHADER_TYPES];
-   int start_vb, num_vb;
+   int num_vb;
+   unsigned start_vb;
    struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
    int num_ve;
    struct pipe_vertex_element ve[PIPE_MAX_ATTRIBS];
@@ -361,8 +362,9 @@ static VkResult handle_vertex_buffers(struct val_cmd_buffer_entry *cmd,
       state->vb[idx].buffer_offset = vcb->offsets[i];
       state->vb[idx].buffer = vcb->buffers[i]->bo;
    }
-   state->start_vb = vcb->first;
-   state->num_vb = vcb->binding_count;
+   if (vcb->first < state->start_vb)
+     state->start_vb = vcb->first;
+   state->num_vb += vcb->binding_count;
    state->vb_dirty = true;
    return VK_SUCCESS;
 }
@@ -379,7 +381,7 @@ static void handle_descriptor(struct rendering_state *state,
       state->iv[sidx][idx].format = vk_format_to_pipe(iv->format);
       state->iv[sidx][idx].u.tex.first_layer = iv->subresourceRange.baseArrayLayer;
       state->iv[sidx][idx].u.tex.last_layer = iv->subresourceRange.baseArrayLayer +
-	 iv->subresourceRange.layerCount;
+	 iv->subresourceRange.layerCount - 1;
       state->iv[sidx][idx].u.tex.level = iv->subresourceRange.baseMipLevel;
       state->num_shader_images[sidx]++;
       break;
@@ -819,6 +821,9 @@ VkResult val_execute_cmds(struct val_device *device,
       }
    }
 
+   state.start_vb = -1;
+   state.num_vb = 0;
+   state.pctx->set_vertex_buffers(state.pctx, 0, PIPE_MAX_ATTRIBS, NULL);
    state.pctx->bind_vertex_elements_state(state.pctx, NULL);
    state.pctx->bind_vs_state(state.pctx, NULL);
    state.pctx->bind_fs_state(state.pctx, NULL);
