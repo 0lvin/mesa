@@ -299,15 +299,27 @@ static struct ureg_src
 ntt_get_src(struct ntt_compile *c, nir_src src)
 {
    struct hash_entry *entry;
-
+   bool is_indirect = false;
    if (src.is_ssa)
       entry = _mesa_hash_table_search(c->def_ht, src.ssa);
    else {
       entry = _mesa_hash_table_search(c->def_ht, src.reg.reg);
-      assert(!src.reg.indirect); /* XXX: Not supported yet. */
+      if (src.reg.indirect)
+	is_indirect = true;
    }
    struct ureg_dst dst = *((struct ureg_dst *) entry->data);
-   struct ureg_src usrc = ureg_src(dst);
+   struct ureg_src usrc;
+
+   if (!is_indirect)
+     usrc = ureg_src(dst);
+   else {
+     if (!c->addr_declared) {
+       c->addr_reg = ureg_DECL_address(c->ureg);
+       c->addr_declared = true;
+     }
+     ureg_UARL(c->ureg, c->addr_reg, ntt_get_src(c, *src.reg.indirect));
+     usrc = ureg_src_indirect(ureg_src(dst), ureg_src(c->addr_reg));
+   }
 
    return usrc;
 }
@@ -335,8 +347,14 @@ ntt_get_dst(struct ntt_compile *c, nir_dest dest)
       _mesa_hash_table_search(c->def_ht, dest.reg.reg);
    struct ureg_dst dst = *((struct ureg_dst *) entry->data);
 
-   assert(!dest.reg.indirect); /* XXX: Not supported yet. */
-
+   if (dest.reg.indirect) {
+     if (!c->addr_declared) {
+       c->addr_reg = ureg_DECL_address(c->ureg);
+       c->addr_declared = true;
+     }
+     ureg_UARL(c->ureg, c->addr_reg, ntt_get_src(c, *dest.reg.indirect));
+     dst = ureg_dst_indirect(dst, ureg_src(c->addr_reg));
+   }
    return dst;
 }
 
@@ -1286,6 +1304,9 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    nir_print_shader(s, stdout);
    nir_convert_from_ssa(s, false);
    nir_lower_vec_to_movs(s);
+   nir_opt_global_to_local(s);
+   nir_lower_locals_to_regs(s);
+   nir_print_shader(s, stdout);
 
    if (s->stage == MESA_SHADER_VERTEX) {
       foreach_list_typed(nir_variable, var, node, &s->inputs) {

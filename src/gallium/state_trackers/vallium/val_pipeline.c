@@ -391,17 +391,25 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
 
       free(spec_entries);
 
-      nir_lower_global_vars_to_local(nir);
       nir_lower_returns(nir);
       nir_validate_shader(nir);
 
       nir_inline_functions(nir);
       nir_validate_shader(nir);
 
-      nir_opt_global_to_local(nir);
+      /* Pick off the single entrypoint that we want */
+      foreach_list_typed_safe(nir_function, func, node, &nir->functions) {
+	if (func != entry_point)
+            exec_node_remove(&func->node);
+      }
+      assert(exec_list_length(&nir->functions) == 1);
+      entry_point->name = ralloc_strdup(entry_point, "main");
 
       nir_lower_system_values(nir);
-      nir_opt_constant_folding(nir);
+
+      nir_lower_global_vars_to_local(nir);
+      nir_remove_dead_variables(nir, nir_var_global);
+
       do {
          progress = false;
 
