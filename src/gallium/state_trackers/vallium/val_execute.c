@@ -658,6 +658,45 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+static VkResult handle_copy_image(struct val_cmd_buffer_entry *cmd,
+				  struct rendering_state *state)
+{
+   int i;
+   struct val_cmd_copy_image *copycmd = &cmd->u.copy_image;
+   struct pipe_blit_info info;
+
+   memset(&info, 0, sizeof(info));
+
+   state->pctx->flush(state->pctx, NULL, 0);
+   info.src.resource = copycmd->src->bo;
+   info.dst.resource = copycmd->dst->bo;
+   info.src.format = copycmd->src->bo->format;
+   info.dst.format = copycmd->dst->bo->format;
+   info.mask = PIPE_MASK_RGBA;
+   info.filter = PIPE_TEX_FILTER_NEAREST;
+   for (i = 0; i < copycmd->region_count; i++) {
+      info.src.level = copycmd->regions[i].srcSubresource.mipLevel;
+      info.src.box.x = copycmd->regions[i].srcOffset.x;
+      info.src.box.y = copycmd->regions[i].srcOffset.y;
+      info.src.box.z = copycmd->regions[i].srcOffset.z;
+      info.src.box.width = copycmd->regions[i].extent.width;
+      info.src.box.height = copycmd->regions[i].extent.height;
+      info.src.box.depth = copycmd->regions[i].extent.depth;
+
+      info.dst.level = copycmd->regions[i].dstSubresource.mipLevel;
+      info.dst.box.x = copycmd->regions[i].dstOffset.x;
+      info.dst.box.y = copycmd->regions[i].dstOffset.y;
+      info.dst.box.z = copycmd->regions[i].dstOffset.z;
+      info.dst.box.width = copycmd->regions[i].extent.width;
+      info.dst.box.height = copycmd->regions[i].extent.height;
+      info.dst.box.depth = copycmd->regions[i].extent.depth;
+
+      state->pctx->blit(state->pctx, &info);
+   }
+
+   return VK_SUCCESS;
+
+}
 static VkResult handle_draw_indexed(struct val_cmd_buffer_entry *cmd,
 				    struct rendering_state *state)
 {
@@ -773,6 +812,9 @@ VkResult val_execute_cmds(struct val_device *device,
       case VAL_CMD_DISPATCH_INDIRECT:
 	 handle_dispatch_indirect(cmd, &state);
 	 break;
+      case VAL_CMD_COPY_IMAGE:
+         handle_copy_image(cmd, &state);
+         break;
       }
    }
 

@@ -31,7 +31,10 @@ val_image_create(VkDevice _device,
       template.width0 = pCreateInfo->extent.width;
       template.height0 = pCreateInfo->extent.height;
       template.depth0 = pCreateInfo->extent.depth;
-      template.array_size = 1;
+      template.array_size = pCreateInfo->arrayLayers;
+      template.last_level = pCreateInfo->mipLevels - 1;
+      if (template.array_size > 1)
+	template.target = PIPE_TEXTURE_2D_ARRAY;
       if (create_info->bind_flags)
          template.bind = create_info->bind_flags;
       image->bo = device->pscreen->resource_create_unbacked(device->pscreen,

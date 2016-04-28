@@ -489,6 +489,7 @@ struct val_cmd_pool {
 #define VAL_CMD_BIND_INDEX_BUFFER 10
 #define VAL_CMD_DISPATCH 11
 #define VAL_CMD_DISPATCH_INDIRECT 12
+#define VAL_CMD_COPY_IMAGE 13
 
 struct val_cmd_bind_pipeline {
    VkPipelineBindPoint bind_point;
@@ -566,6 +567,15 @@ struct val_cmd_dispatch_indirect {
    VkDeviceSize offset;
 };
 
+struct val_cmd_copy_image {
+   struct val_image *src;
+   struct val_image *dst;
+   VkImageLayout src_layout;
+   VkImageLayout dst_layout;
+   uint32_t region_count;
+   const VkImageCopy *regions;
+};
+
 struct val_cmd_buffer_entry {
    struct list_head cmd_link;
    uint32_t cmd_type;
@@ -581,6 +591,7 @@ struct val_cmd_buffer_entry {
       struct val_cmd_bind_index_buffer index_buffer;
       struct val_cmd_dispatch dispatch;
       struct val_cmd_dispatch_indirect dispatch_indirect;
+      struct val_cmd_copy_image copy_image;
    } u;
 };
       
