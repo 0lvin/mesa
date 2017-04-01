@@ -1301,6 +1301,9 @@ static void visit_alu(struct nir_to_llvm_context *ctx, nir_alu_instr *instr)
 		src[1] = to_float(ctx, src[1]);
 		result = LLVMBuildFRem(ctx->builder, src[0], src[1], "");
 		break;
+	case nir_op_irem:
+		result = LLVMBuildSRem(ctx->builder, src[0], src[1], "");
+		break;
 	case nir_op_idiv:
 		result = LLVMBuildSDiv(ctx->builder, src[0], src[1], "");
 		break;
@@ -1683,7 +1686,7 @@ static LLVMValueRef radv_lower_gather4_integer(struct nir_to_llvm_context *ctx,
 
 		for (c = 0; c < 2; c++) {
 			half_texel[c] = LLVMBuildExtractElement(ctx->builder, size,
-								ctx->i32zero, "");
+								LLVMConstInt(ctx->i32, c, false), "");
 			half_texel[c] = LLVMBuildUIToFP(ctx->builder, half_texel[c], ctx->f32, "");
 			half_texel[c] = emit_fdiv(ctx, ctx->f32one, half_texel[c]);
 			half_texel[c] = LLVMBuildFMul(ctx->builder, half_texel[c],
@@ -1782,15 +1785,17 @@ static LLVMValueRef visit_vulkan_resource_index(struct nir_to_llvm_context *ctx,
 	unsigned desc_set = nir_intrinsic_desc_set(instr);
 	unsigned binding = nir_intrinsic_binding(instr);
 	LLVMValueRef desc_ptr = ctx->descriptor_sets[desc_set];
-	struct radv_descriptor_set_layout *layout = ctx->options->layout->set[desc_set].layout;
+	struct radv_pipeline_layout *pipeline_layout = ctx->options->layout;
+	struct radv_descriptor_set_layout *layout = pipeline_layout->set[desc_set].layout;
 	unsigned base_offset = layout->binding[binding].offset;
 	LLVMValueRef offset, stride;
 
 	if (layout->binding[binding].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
 	    layout->binding[binding].type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) {
+		unsigned idx = pipeline_layout->set[desc_set].dynamic_offset_start +
+			layout->binding[binding].dynamic_offset_offset;
 		desc_ptr = ctx->push_constants;
-		base_offset = ctx->options->layout->push_constant_size;
-		base_offset +=  16 * layout->binding[binding].dynamic_offset_offset;
+		base_offset = pipeline_layout->push_constant_size + 16 * idx;
 		stride = LLVMConstInt(ctx->i32, 16, false);
 	} else
 		stride = LLVMConstInt(ctx->i32, layout->binding[binding].size, false);
@@ -2609,6 +2614,24 @@ static void emit_barrier(struct nir_to_llvm_context *ctx)
 			    ctx->voidt, NULL, 0, 0);
 }
 
+static void emit_discard_if(struct nir_to_llvm_context *ctx,
+			    nir_intrinsic_instr *instr)
+{
+	LLVMValueRef cond;
+	ctx->shader_info->fs.can_discard = true;
+
+	cond = LLVMBuildICmp(ctx->builder, LLVMIntNE,
+			     get_src(ctx, instr->src[0]),
+			     ctx->i32zero, "");
+
+	cond = LLVMBuildSelect(ctx->builder, cond,
+			       LLVMConstReal(ctx->f32, -1.0f),
+			       ctx->f32zero, "");
+	emit_llvm_intrinsic(ctx, "llvm.AMDGPU.kill",
+			    LLVMVoidTypeInContext(ctx->context),
+			    &cond, 1, 0);
+}
+
 static LLVMValueRef
 visit_load_local_invocation_index(struct nir_to_llvm_context *ctx)
 {
@@ -2920,6 +2943,9 @@ static void visit_intrinsic(struct nir_to_llvm_context *ctx,
 		emit_llvm_intrinsic(ctx, "llvm.AMDGPU.kilp",
 				    LLVMVoidTypeInContext(ctx->context),
 				    NULL, 0, 0);
+		break;
+	case nir_intrinsic_discard_if:
+		emit_discard_if(ctx, instr);
 		break;
 	case nir_intrinsic_memory_barrier:
 		emit_waitcnt(ctx);
@@ -3277,18 +3303,31 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 		}
 	}
 
+	if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF) {
+		result = get_buffer_size(ctx, res_ptr, true);
+		goto write_result;
+	}
+
 	if (instr->op == nir_texop_texture_samples) {
-		LLVMValueRef res, samples;
+		LLVMValueRef res, samples, is_msaa;
 		res = LLVMBuildBitCast(ctx->builder, res_ptr, ctx->v8i32, "");
 		samples = LLVMBuildExtractElement(ctx->builder, res,
 						  LLVMConstInt(ctx->i32, 3, false), "");
+		is_msaa = LLVMBuildLShr(ctx->builder, samples,
+					LLVMConstInt(ctx->i32, 28, false), "");
+		is_msaa = LLVMBuildAnd(ctx->builder, is_msaa,
+				       LLVMConstInt(ctx->i32, 0xe, false), "");
+		is_msaa = LLVMBuildICmp(ctx->builder, LLVMIntEQ, is_msaa,
+					LLVMConstInt(ctx->i32, 0xe, false), "");
+
 		samples = LLVMBuildLShr(ctx->builder, samples,
 					LLVMConstInt(ctx->i32, 16, false), "");
 		samples = LLVMBuildAnd(ctx->builder, samples,
 				       LLVMConstInt(ctx->i32, 0xf, false), "");
 		samples = LLVMBuildShl(ctx->builder, ctx->i32one,
 				       samples, "");
-
+		samples = LLVMBuildSelect(ctx->builder, is_msaa, samples,
+					  ctx->i32one, "");
 		result = samples;
 		goto write_result;
 	}
@@ -3387,7 +3426,10 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 		address[count++] = sample_index;
 	} else if(instr->op == nir_texop_txs) {
 		count = 0;
-		address[count++] = lod;
+		if (lod)
+			address[count++] = lod;
+		else
+			address[count++] = ctx->i32zero;
 	}
 
 	for (chan = 0; chan < count; chan++) {
@@ -3412,7 +3454,7 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 		result = build_tex_intrinsic(ctx, instr, &txf_info);
 
 		result = LLVMBuildExtractElement(ctx->builder, result, ctx->i32zero, "");
-		result = LLVMBuildICmp(ctx->builder, LLVMIntEQ, result, ctx->i32zero, "");
+		result = emit_int_cmp(ctx, LLVMIntEQ, result, ctx->i32zero);
 		goto write_result;
 	}
 
@@ -3430,7 +3472,8 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 	 * The sample index should be adjusted as follows:
 	 *   sample_index = (fmask >> (sample_index * 4)) & 0xF;
 	 */
-	if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS) {
+	if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
+	    instr->op != nir_texop_txs) {
 		LLVMValueRef txf_address[4];
 		struct ac_tex_info txf_info = { 0 };
 		unsigned txf_count = count;
@@ -3485,12 +3528,13 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 	if (offsets && instr->op == nir_texop_txf) {
 		nir_const_value *const_offset =
 			nir_src_as_const_value(instr->src[const_src].src);
-
+		int num_offsets = instr->src[const_src].src.ssa->num_components;
 		assert(const_offset);
-		if (instr->coord_components > 2)
+		num_offsets = MIN2(num_offsets, instr->coord_components);
+		if (num_offsets > 2)
 			address[2] = LLVMBuildAdd(ctx->builder,
 						  address[2], LLVMConstInt(ctx->i32, const_offset->i32[2], false), "");
-		if (instr->coord_components > 1)
+		if (num_offsets > 1)
 			address[1] = LLVMBuildAdd(ctx->builder,
 						  address[1], LLVMConstInt(ctx->i32, const_offset->i32[1], false), "");
 		address[0] = LLVMBuildAdd(ctx->builder,
@@ -3512,6 +3556,8 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 
 	if (instr->op == nir_texop_query_levels)
 		result = LLVMBuildExtractElement(ctx->builder, result, LLVMConstInt(ctx->i32, 3, false), "");
+	else if (instr->is_shadow && instr->op != nir_texop_txs && instr->op != nir_texop_lod && instr->op != nir_texop_tg4)
+		result = LLVMBuildExtractElement(ctx->builder, result, ctx->i32zero, "");
 	else if (instr->op == nir_texop_txs &&
 		 instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
 		 instr->is_array) {
@@ -3520,7 +3566,8 @@ static void visit_tex(struct nir_to_llvm_context *ctx, nir_tex_instr *instr)
 		LLVMValueRef z = LLVMBuildExtractElement(ctx->builder, result, two, "");
 		z = LLVMBuildSDiv(ctx->builder, z, six, "");
 		result = LLVMBuildInsertElement(ctx->builder, result, z, two, "");
-	}
+	} else if (instr->dest.ssa.num_components != 4)
+		result = trim_vector(ctx, result, instr->dest.ssa.num_components);
 
 write_result:
 	if (result) {
@@ -3910,7 +3957,7 @@ static void
 handle_shader_output_decl(struct nir_to_llvm_context *ctx,
 			  struct nir_variable *variable)
 {
-	int idx = variable->data.location;
+	int idx = variable->data.location + variable->data.index;
 	unsigned attrib_count = glsl_count_attribute_slots(variable->type, false);
 
 	variable->data.driver_location = idx * 4;
@@ -3940,7 +3987,7 @@ handle_shader_output_decl(struct nir_to_llvm_context *ctx,
 		                       si_build_alloca_undef(ctx, ctx->f32, "");
 		}
 	}
-	ctx->output_mask |= ((1ull << attrib_count) - 1) << variable->data.location;
+	ctx->output_mask |= ((1ull << attrib_count) - 1) << idx;
 }
 
 static void
@@ -4351,11 +4398,9 @@ handle_fs_outputs_post(struct nir_to_llvm_context *ctx,
 
 	for (unsigned i = 0; i < RADEON_LLVM_MAX_OUTPUTS; ++i) {
 		LLVMValueRef values[4];
-		bool last;
+
 		if (!(ctx->output_mask & (1ull << i)))
 			continue;
-
-		last = ctx->output_mask <= ((1ull << (i + 1)) - 1);
 
 		if (i == FRAG_RESULT_DEPTH) {
 			ctx->shader_info->fs.writes_z = true;
@@ -4366,9 +4411,13 @@ handle_fs_outputs_post(struct nir_to_llvm_context *ctx,
 			stencil = to_float(ctx, LLVMBuildLoad(ctx->builder,
 							      ctx->outputs[radeon_llvm_reg_index_soa(i, 0)], ""));
 		} else {
+			bool last = false;
 			for (unsigned j = 0; j < 4; j++)
 				values[j] = to_float(ctx, LLVMBuildLoad(ctx->builder,
 									ctx->outputs[radeon_llvm_reg_index_soa(i, j)], ""));
+
+			if (!ctx->shader_info->fs.writes_z && !ctx->shader_info->fs.writes_stencil)
+				last = ctx->output_mask <= ((1ull << (i + 1)) - 1);
 
 			si_export_mrt_color(ctx, values, V_008DFC_SQ_EXP_MRT + index, last);
 			index++;
@@ -4450,6 +4499,13 @@ LLVMModuleRef ac_translate_nir_to_llvm(LLVMTargetMachineRef tm,
 	memset(shader_info, 0, sizeof(*shader_info));
 
 	LLVMSetTarget(ctx.module, "amdgcn--");
+
+	LLVMTargetDataRef data_layout = LLVMCreateTargetDataLayout(tm);
+	char *data_layout_str = LLVMCopyStringRepOfTargetData(data_layout);
+	LLVMSetDataLayout(ctx.module, data_layout_str);
+	LLVMDisposeTargetData(data_layout);
+	LLVMDisposeMessage(data_layout_str);
+
 	setup_types(&ctx);
 
 	ctx.builder = LLVMCreateBuilderInContext(ctx.context);
@@ -4471,7 +4527,7 @@ LLVMModuleRef ac_translate_nir_to_llvm(LLVMTargetMachineRef tm,
 				idx++;
 			}
 
-			shared_size *= 4;
+			shared_size *= 16;
 			var = LLVMAddGlobalInAddressSpace(ctx.module,
 							  LLVMArrayType(ctx.i8, shared_size),
 							  "compute_lds",

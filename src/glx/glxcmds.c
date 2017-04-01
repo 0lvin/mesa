@@ -1761,7 +1761,11 @@ __glXSwapIntervalSGI(int interval)
           psc->driScreen->setSwapInterval) {
       __GLXDRIdrawable *pdraw =
 	 GetGLXDRIDrawable(gc->currentDpy, gc->currentDrawable);
-      psc->driScreen->setSwapInterval(pdraw, interval);
+      /* Simply ignore the command if the GLX drawable has been destroyed but
+       * the context is still bound.
+       */
+      if (pdraw)
+         psc->driScreen->setSwapInterval(pdraw, interval);
       return 0;
    }
 #endif
@@ -1807,7 +1811,14 @@ __glXSwapIntervalMESA(unsigned int interval)
       if (psc && psc->driScreen && psc->driScreen->setSwapInterval) {
          __GLXDRIdrawable *pdraw =
 	    GetGLXDRIDrawable(gc->currentDpy, gc->currentDrawable);
-	 return psc->driScreen->setSwapInterval(pdraw, interval);
+
+         /* Simply ignore the command if the GLX drawable has been destroyed but
+          * the context is still bound.
+          */
+         if (!pdraw)
+            return 0;
+
+         return psc->driScreen->setSwapInterval(pdraw, interval);
       }
    }
 #endif
@@ -1829,7 +1840,8 @@ __glXGetSwapIntervalMESA(void)
       if (psc && psc->driScreen && psc->driScreen->getSwapInterval) {
          __GLXDRIdrawable *pdraw =
 	    GetGLXDRIDrawable(gc->currentDpy, gc->currentDrawable);
-	 return psc->driScreen->getSwapInterval(pdraw);
+         if (pdraw)
+            return psc->driScreen->getSwapInterval(pdraw);
       }
    }
 #endif
@@ -2713,7 +2725,7 @@ __glXGetUST(int64_t * ust)
 
 #if defined(GLX_DIRECT_RENDERING) && !defined(GLX_USE_APPLEGL)
 
-int
+PUBLIC int
 MesaGLInteropGLXQueryDeviceInfo(Display *dpy, GLXContext context,
                                 struct mesa_glinterop_device_info *out)
 {
@@ -2737,7 +2749,7 @@ MesaGLInteropGLXQueryDeviceInfo(Display *dpy, GLXContext context,
    return ret;
 }
 
-int
+PUBLIC int
 MesaGLInteropGLXExportObject(Display *dpy, GLXContext context,
                              struct mesa_glinterop_export_in *in,
                              struct mesa_glinterop_export_out *out)

@@ -295,10 +295,10 @@ anv_get_format(const struct gen_device_info *devinfo, VkFormat vk_format,
       }
    }
 
-   /* The B4G4R4A4 format isn't available prior to Sky Lake so we have to fall
+   /* The B4G4R4A4 format isn't available prior to Broadwell so we have to fall
     * back to a format with a more complex swizzle.
     */
-   if (vk_format == VK_FORMAT_B4G4R4A4_UNORM_PACK16 && devinfo->gen < 9) {
+   if (vk_format == VK_FORMAT_B4G4R4A4_UNORM_PACK16 && devinfo->gen < 8) {
       return (struct anv_format) {
          .isl_format = ISL_FORMAT_B4G4R4A4_UNORM,
          .swizzle = ISL_SWIZZLE(GREEN, RED, ALPHA, BLUE),
@@ -462,6 +462,9 @@ VkResult anv_GetPhysicalDeviceImageFormatProperties(
    uint32_t maxMipLevels;
    uint32_t maxArraySize;
    VkSampleCountFlags sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+
+   if (anv_formats[format].isl_format == ISL_FORMAT_UNSUPPORTED)
+      goto unsupported;
 
    anv_physical_device_get_format_properties(physical_device, format,
                                              &format_props);

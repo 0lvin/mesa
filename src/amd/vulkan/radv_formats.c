@@ -154,6 +154,7 @@ uint32_t radv_translate_tex_dataformat(VkFormat format,
 		case VK_FORMAT_D16_UNORM:
 			return V_008F14_IMG_DATA_FORMAT_16;
 		case VK_FORMAT_D24_UNORM_S8_UINT:
+		case VK_FORMAT_X8_D24_UNORM_PACK32:
 			return V_008F14_IMG_DATA_FORMAT_8_24;
 		case VK_FORMAT_S8_UINT:
 			return V_008F14_IMG_DATA_FORMAT_8;
@@ -729,9 +730,6 @@ uint32_t radv_translate_dbformat(VkFormat format)
 	case VK_FORMAT_D16_UNORM:
 	case VK_FORMAT_D16_UNORM_S8_UINT:
 		return V_028040_Z_16;
-	case VK_FORMAT_X8_D24_UNORM_PACK32:
-	case VK_FORMAT_D24_UNORM_S8_UINT:
-		return V_028040_Z_24; /* deprecated on SI */
 	case VK_FORMAT_D32_SFLOAT:
 	case VK_FORMAT_D32_SFLOAT_S8_UINT:
 		return V_028040_Z_32_FLOAT;

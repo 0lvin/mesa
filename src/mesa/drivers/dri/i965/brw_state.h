@@ -111,7 +111,7 @@ extern const struct brw_tracked_state gen7_cs_push_constants;
 extern const struct brw_tracked_state gen6_binding_table_pointers;
 extern const struct brw_tracked_state gen6_blend_state;
 extern const struct brw_tracked_state gen6_clip_state;
-extern const struct brw_tracked_state gen6_clip_vp;
+extern const struct brw_tracked_state gen6_sf_and_clip_viewports;
 extern const struct brw_tracked_state gen6_color_calc_state;
 extern const struct brw_tracked_state gen6_depth_stencil_state;
 extern const struct brw_tracked_state gen6_gs_state;
@@ -330,21 +330,13 @@ void brw_emit_sampler_state(struct brw_context *brw,
                             unsigned wrap_s,
                             unsigned wrap_t,
                             unsigned wrap_r,
+                            unsigned base_level,
                             unsigned min_lod,
                             unsigned max_lod,
                             int lod_bias,
                             unsigned shadow_function,
                             bool non_normalized_coordinates,
                             uint32_t border_color_offset);
-
-void brw_update_sampler_state(struct brw_context *brw,
-                              GLenum target, bool tex_cube_map_seamless,
-                              GLfloat tex_unit_lod_bias,
-                              mesa_format format, GLenum base_format,
-                              bool is_integer_format,
-                              const struct gl_sampler_object *sampler,
-                              uint32_t *sampler_state,
-                              uint32_t batch_offset_for_sampler_state);
 
 /* gen6_wm_state.c */
 void
@@ -461,6 +453,11 @@ use_state_point_size(const struct brw_context *brw)
           (brw->vue_map_geom_out.slots_valid & VARYING_BIT_PSIZ) == 0;
 }
 
+void brw_calculate_guardband_size(const struct gen_device_info *devinfo,
+                                  uint32_t fb_width, uint32_t fb_height,
+                                  float m00, float m11, float m30, float m31,
+                                  float *xmin, float *xmax,
+                                  float *ymin, float *ymax);
 
 #ifdef __cplusplus
 }

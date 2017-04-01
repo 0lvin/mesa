@@ -288,9 +288,12 @@ VkResult anv_AllocateCommandBuffers(
          break;
    }
 
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
       anv_FreeCommandBuffers(_device, pAllocateInfo->commandPool,
                              i, pCommandBuffers);
+      for (i = 0; i < pAllocateInfo->commandBufferCount; i++)
+         pCommandBuffers[i] = VK_NULL_HANDLE;
+   }
 
    return result;
 }
@@ -317,6 +320,9 @@ void anv_FreeCommandBuffers(
 {
    for (uint32_t i = 0; i < commandBufferCount; i++) {
       ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, pCommandBuffers[i]);
+
+      if (!cmd_buffer)
+         continue;
 
       anv_cmd_buffer_destroy(cmd_buffer);
    }
@@ -658,7 +664,7 @@ anv_cmd_buffer_push_constants(struct anv_cmd_buffer *cmd_buffer,
    struct anv_push_constants *data =
       cmd_buffer->state.push_constants[stage];
    const struct brw_stage_prog_data *prog_data =
-      anv_shader_bin_get_prog_data(cmd_buffer->state.pipeline->shaders[stage]);
+      cmd_buffer->state.pipeline->shaders[stage]->prog_data;
 
    /* If we don't actually have any push constants, bail. */
    if (data == NULL || prog_data == NULL || prog_data->nr_params == 0)
@@ -795,6 +801,9 @@ void anv_DestroyCommandPool(
 {
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_cmd_pool, pool, commandPool);
+
+   if (!pool)
+      return;
 
    list_for_each_entry_safe(struct anv_cmd_buffer, cmd_buffer,
                             &pool->cmd_buffers, pool_link) {

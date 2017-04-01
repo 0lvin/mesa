@@ -54,8 +54,6 @@ genX(cmd_buffer_emit_state_base_address)(struct anv_cmd_buffer *cmd_buffer)
 {
    struct anv_device *device = cmd_buffer->device;
 
-/* XXX: Do we need this on more than just BDW? */
-#if (GEN_GEN >= 8)
    /* Emit a render target cache flush.
     *
     * This isn't documented anywhere in the PRM.  However, it seems to be
@@ -64,9 +62,10 @@ genX(cmd_buffer_emit_state_base_address)(struct anv_cmd_buffer *cmd_buffer)
     * clear depth, reset state base address, and then go render stuff.
     */
    anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
+      pc.DCFlushEnable = true;
       pc.RenderTargetCacheFlushEnable = true;
+      pc.CommandStreamerStallEnable = true;
    }
-#endif
 
    anv_batch_emit(&cmd_buffer->batch, GENX(STATE_BASE_ADDRESS), sba) {
       sba.GeneralStateBaseAddress = (struct anv_address) { NULL, 0 };
@@ -147,6 +146,8 @@ genX(cmd_buffer_emit_state_base_address)(struct anv_cmd_buffer *cmd_buffer)
     */
    anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
       pc.TextureCacheInvalidationEnable = true;
+      pc.ConstantCacheInvalidationEnable = true;
+      pc.StateCacheInvalidationEnable = true;
    }
 }
 
@@ -200,19 +201,8 @@ genX(EndCommandBuffer)(
     VkCommandBuffer                             commandBuffer)
 {
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
-   struct anv_device *device = cmd_buffer->device;
 
    anv_cmd_buffer_end_batch_buffer(cmd_buffer);
-
-   if (cmd_buffer->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
-      /* The algorithm used to compute the validate list is not threadsafe as
-       * it uses the bo->index field.  We have to lock the device around it.
-       * Fortunately, the chances for contention here are probably very low.
-       */
-      pthread_mutex_lock(&device->mutex);
-      anv_cmd_buffer_prepare_execbuf(cmd_buffer);
-      pthread_mutex_unlock(&device->mutex);
-   }
 
    return VK_SUCCESS;
 }
@@ -1354,24 +1344,25 @@ flush_compute_descriptor_set(struct anv_cmd_buffer *cmd_buffer)
    struct anv_state surfaces = { 0, }, samplers = { 0, };
    VkResult result;
 
-   result = emit_samplers(cmd_buffer, MESA_SHADER_COMPUTE, &samplers);
-   if (result != VK_SUCCESS)
-      return result;
    result = emit_binding_table(cmd_buffer, MESA_SHADER_COMPUTE, &surfaces);
-   if (result != VK_SUCCESS)
-      return result;
+   if (result != VK_SUCCESS) {
+      result = anv_cmd_buffer_new_binding_table_block(cmd_buffer);
+      assert(result == VK_SUCCESS);
 
-   struct anv_state push_state = anv_cmd_buffer_cs_push_constants(cmd_buffer);
+      /* Re-emit state base addresses so we get the new surface state base
+       * address before we start emitting binding tables etc.
+       */
+      genX(cmd_buffer_emit_state_base_address)(cmd_buffer);
+
+      result = emit_binding_table(cmd_buffer, MESA_SHADER_COMPUTE, &surfaces);
+      assert(result == VK_SUCCESS);
+   }
+
+   result = emit_samplers(cmd_buffer, MESA_SHADER_COMPUTE, &samplers);
+   assert(result == VK_SUCCESS);
 
    const struct brw_cs_prog_data *cs_prog_data = get_cs_prog_data(pipeline);
    const struct brw_stage_prog_data *prog_data = &cs_prog_data->base;
-
-   if (push_state.alloc_size) {
-      anv_batch_emit(&cmd_buffer->batch, GENX(MEDIA_CURBE_LOAD), curbe) {
-         curbe.CURBETotalDataLength    = push_state.alloc_size;
-         curbe.CURBEDataStartAddress   = push_state.offset;
-      }
-   }
 
    const uint32_t slm_size = encode_slm_size(GEN_GEN, prog_data->total_shared);
 
@@ -1419,8 +1410,20 @@ genX(cmd_buffer_flush_compute_state)(struct anv_cmd_buffer *cmd_buffer)
 
    genX(flush_pipeline_select_gpgpu)(cmd_buffer);
 
-   if (cmd_buffer->state.compute_dirty & ANV_CMD_DIRTY_PIPELINE)
+   if (cmd_buffer->state.compute_dirty & ANV_CMD_DIRTY_PIPELINE) {
+      /* From the Sky Lake PRM Vol 2a, MEDIA_VFE_STATE:
+       *
+       *    "A stalling PIPE_CONTROL is required before MEDIA_VFE_STATE unless
+       *    the only bits that are changed are scoreboard related: Scoreboard
+       *    Enable, Scoreboard Type, Scoreboard Mask, Scoreboard * Delta. For
+       *    these scoreboard related states, a MEDIA_STATE_FLUSH is
+       *    sufficient."
+       */
+      cmd_buffer->state.pending_pipe_bits |= ANV_PIPE_CS_STALL_BIT;
+      genX(cmd_buffer_apply_pipe_flushes)(cmd_buffer);
+
       anv_batch_emit_batch(&cmd_buffer->batch, &pipeline->batch);
+   }
 
    if ((cmd_buffer->state.descriptors_dirty & VK_SHADER_STAGE_COMPUTE_BIT) ||
        (cmd_buffer->state.compute_dirty & ANV_CMD_DIRTY_PIPELINE)) {
@@ -1428,6 +1431,18 @@ genX(cmd_buffer_flush_compute_state)(struct anv_cmd_buffer *cmd_buffer)
       result = flush_compute_descriptor_set(cmd_buffer);
       assert(result == VK_SUCCESS);
       cmd_buffer->state.descriptors_dirty &= ~VK_SHADER_STAGE_COMPUTE_BIT;
+   }
+
+   if (cmd_buffer->state.push_constants_dirty & VK_SHADER_STAGE_COMPUTE_BIT) {
+      struct anv_state push_state =
+         anv_cmd_buffer_cs_push_constants(cmd_buffer);
+
+      if (push_state.alloc_size) {
+         anv_batch_emit(&cmd_buffer->batch, GENX(MEDIA_CURBE_LOAD), curbe) {
+            curbe.CURBETotalDataLength    = push_state.alloc_size;
+            curbe.CURBEDataStartAddress   = push_state.offset;
+         }
+      }
    }
 
    cmd_buffer->state.compute_dirty = 0;
@@ -1672,6 +1687,35 @@ genX(flush_pipeline_select_gpgpu)(struct anv_cmd_buffer *cmd_buffer)
    }
 }
 
+void
+genX(cmd_buffer_emit_gen7_depth_flush)(struct anv_cmd_buffer *cmd_buffer)
+{
+   if (GEN_GEN >= 8)
+      return;
+
+   /* From the Haswell PRM, documentation for 3DSTATE_DEPTH_BUFFER:
+    *
+    *    "Restriction: Prior to changing Depth/Stencil Buffer state (i.e., any
+    *    combination of 3DSTATE_DEPTH_BUFFER, 3DSTATE_CLEAR_PARAMS,
+    *    3DSTATE_STENCIL_BUFFER, 3DSTATE_HIER_DEPTH_BUFFER) SW must first
+    *    issue a pipelined depth stall (PIPE_CONTROL with Depth Stall bit
+    *    set), followed by a pipelined depth cache flush (PIPE_CONTROL with
+    *    Depth Flush Bit set, followed by another pipelined depth stall
+    *    (PIPE_CONTROL with Depth Stall Bit set), unless SW can otherwise
+    *    guarantee that the pipeline from WM onwards is already flushed (e.g.,
+    *    via a preceding MI_FLUSH)."
+    */
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pipe) {
+      pipe.DepthStallEnable = true;
+   }
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pipe) {
+      pipe.DepthCacheFlushEnable = true;
+   }
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pipe) {
+      pipe.DepthStallEnable = true;
+   }
+}
+
 static void
 cmd_buffer_emit_depth_stencil(struct anv_cmd_buffer *cmd_buffer)
 {
@@ -1687,6 +1731,8 @@ cmd_buffer_emit_depth_stencil(struct anv_cmd_buffer *cmd_buffer)
 
    /* FIXME: Implement the PMA stall W/A */
    /* FIXME: Width and Height are wrong */
+
+   genX(cmd_buffer_emit_gen7_depth_flush)(cmd_buffer);
 
    /* Emit 3DSTATE_DEPTH_BUFFER */
    if (has_depth) {
@@ -1714,14 +1760,17 @@ cmd_buffer_emit_depth_stencil(struct anv_cmd_buffer *cmd_buffer)
          db.Height               = image->extent.height - 1;
          db.Width                = image->extent.width - 1;
          db.LOD                  = iview->isl.base_level;
-         db.Depth                = image->array_size - 1; /* FIXME: 3-D */
          db.MinimumArrayElement  = iview->isl.base_array_layer;
+
+         assert(image->depth_surface.isl.dim != ISL_SURF_DIM_3D);
+         db.Depth =
+         db.RenderTargetViewExtent =
+            iview->isl.array_len - iview->isl.base_array_layer - 1;
 
 #if GEN_GEN >= 8
          db.SurfaceQPitch =
             isl_surf_get_array_pitch_el_rows(&image->depth_surface.isl) >> 2;
 #endif
-         db.RenderTargetViewExtent = 1 - 1;
       }
    } else {
       /* Even when no depth buffer is present, the hardware requires that
@@ -1754,10 +1803,10 @@ cmd_buffer_emit_depth_stencil(struct anv_cmd_buffer *cmd_buffer)
    if (has_hiz) {
       anv_batch_emit(&cmd_buffer->batch, GENX(3DSTATE_HIER_DEPTH_BUFFER), hdb) {
          hdb.HierarchicalDepthBufferObjectControlState = GENX(MOCS);
-         hdb.SurfacePitch = image->hiz_surface.isl.row_pitch - 1;
+         hdb.SurfacePitch = image->aux_surface.isl.row_pitch - 1;
          hdb.SurfaceBaseAddress = (struct anv_address) {
             .bo = image->bo,
-            .offset = image->offset + image->hiz_surface.offset,
+            .offset = image->offset + image->aux_surface.offset,
          };
 #if GEN_GEN >= 8
          /* From the SKL PRM Vol2a:
@@ -1767,11 +1816,14 @@ cmd_buffer_emit_depth_stencil(struct anv_cmd_buffer *cmd_buffer)
           *    - SURFTYPE_1D: distance in pixels between array slices
           *    - SURFTYPE_2D/CUBE: distance in rows between array slices
           *    - SURFTYPE_3D: distance in rows between R - slices
+          *
+          * Unfortunately, the docs aren't 100% accurate here.  They fail to
+          * mention that the 1-D rule only applies to linear 1-D images.
+          * Since depth and HiZ buffers are always tiled, they are treated as
+          * 2-D images.  Prior to Sky Lake, this field is always in rows.
           */
          hdb.SurfaceQPitch =
-            image->hiz_surface.isl.dim == ISL_SURF_DIM_1D ?
-               isl_surf_get_array_pitch_el(&image->hiz_surface.isl) >> 2 :
-               isl_surf_get_array_pitch_el_rows(&image->hiz_surface.isl) >> 2;
+            isl_surf_get_array_pitch_sa_rows(&image->aux_surface.isl) >> 2;
 #endif
       }
    } else {
@@ -1883,26 +1935,59 @@ void genX(CmdEndRenderPass)(
 }
 
 static void
-emit_ps_depth_count(struct anv_batch *batch,
+emit_ps_depth_count(struct anv_cmd_buffer *cmd_buffer,
                     struct anv_bo *bo, uint32_t offset)
 {
-   anv_batch_emit(batch, GENX(PIPE_CONTROL), pc) {
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
       pc.DestinationAddressType  = DAT_PPGTT;
       pc.PostSyncOperation       = WritePSDepthCount;
       pc.DepthStallEnable        = true;
       pc.Address                 = (struct anv_address) { bo, offset };
+
+      if (GEN_GEN == 9 && cmd_buffer->device->info.gt == 4)
+         pc.CommandStreamerStallEnable = true;
    }
 }
 
 static void
-emit_query_availability(struct anv_batch *batch,
+emit_query_availability(struct anv_cmd_buffer *cmd_buffer,
                         struct anv_bo *bo, uint32_t offset)
 {
-   anv_batch_emit(batch, GENX(PIPE_CONTROL), pc) {
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
       pc.DestinationAddressType  = DAT_PPGTT;
       pc.PostSyncOperation       = WriteImmediateData;
       pc.Address                 = (struct anv_address) { bo, offset };
       pc.ImmediateData           = 1;
+   }
+}
+
+void genX(CmdResetQueryPool)(
+    VkCommandBuffer                             commandBuffer,
+    VkQueryPool                                 queryPool,
+    uint32_t                                    firstQuery,
+    uint32_t                                    queryCount)
+{
+   ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
+   ANV_FROM_HANDLE(anv_query_pool, pool, queryPool);
+
+   for (uint32_t i = 0; i < queryCount; i++) {
+      switch (pool->type) {
+      case VK_QUERY_TYPE_OCCLUSION:
+      case VK_QUERY_TYPE_TIMESTAMP: {
+         anv_batch_emit(&cmd_buffer->batch, GENX(MI_STORE_DATA_IMM), sdm) {
+            sdm.Address = (struct anv_address) {
+               .bo = &pool->bo,
+               .offset = (firstQuery + i) * sizeof(struct anv_query_pool_slot) +
+                         offsetof(struct anv_query_pool_slot, available),
+            };
+            sdm.DataDWord0 = 0;
+            sdm.DataDWord1 = 0;
+         }
+         break;
+      }
+      default:
+         assert(!"Invalid query type");
+      }
    }
 }
 
@@ -1931,7 +2016,7 @@ void genX(CmdBeginQuery)(
 
    switch (pool->type) {
    case VK_QUERY_TYPE_OCCLUSION:
-      emit_ps_depth_count(&cmd_buffer->batch, &pool->bo,
+      emit_ps_depth_count(cmd_buffer, &pool->bo,
                           query * sizeof(struct anv_query_pool_slot));
       break;
 
@@ -1951,10 +2036,10 @@ void genX(CmdEndQuery)(
 
    switch (pool->type) {
    case VK_QUERY_TYPE_OCCLUSION:
-      emit_ps_depth_count(&cmd_buffer->batch, &pool->bo,
+      emit_ps_depth_count(cmd_buffer, &pool->bo,
                           query * sizeof(struct anv_query_pool_slot) + 8);
 
-      emit_query_availability(&cmd_buffer->batch, &pool->bo,
+      emit_query_availability(cmd_buffer, &pool->bo,
                               query * sizeof(struct anv_query_pool_slot) + 16);
       break;
 
@@ -1996,11 +2081,14 @@ void genX(CmdWriteTimestamp)(
          pc.DestinationAddressType  = DAT_PPGTT;
          pc.PostSyncOperation       = WriteTimestamp;
          pc.Address = (struct anv_address) { &pool->bo, offset };
+
+         if (GEN_GEN == 9 && cmd_buffer->device->info.gt == 4)
+            pc.CommandStreamerStallEnable = true;
       }
       break;
    }
 
-   emit_query_availability(&cmd_buffer->batch, &pool->bo, query + 16);
+   emit_query_availability(cmd_buffer, &pool->bo, query + 16);
 }
 
 #if GEN_GEN > 7 || GEN_IS_HASWELL

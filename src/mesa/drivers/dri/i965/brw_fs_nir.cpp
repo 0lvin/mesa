@@ -49,55 +49,17 @@ fs_visitor::emit_nir_code()
 }
 
 void
-fs_visitor::nir_setup_single_output_varying(fs_reg *reg,
-                                            const glsl_type *type,
-                                            unsigned *location)
-{
-   if (type->is_array() || type->is_matrix()) {
-      const struct glsl_type *elem_type = glsl_get_array_element(type);
-      const unsigned length = glsl_get_length(type);
-
-      for (unsigned i = 0; i < length; i++) {
-         nir_setup_single_output_varying(reg, elem_type, location);
-      }
-   } else if (type->is_record()) {
-      for (unsigned i = 0; i < type->length; i++) {
-         const struct glsl_type *field_type = type->fields.structure[i].type;
-         nir_setup_single_output_varying(reg, field_type, location);
-      }
-   } else {
-      assert(type->is_scalar() || type->is_vector());
-      unsigned num_iter = 1;
-      if (type->is_dual_slot())
-         num_iter = 2;
-      for (unsigned count = 0; count < num_iter; count++) {
-         this->outputs[*location] = *reg;
-         *reg = offset(*reg, bld, 4);
-         (*location)++;
-      }
-   }
-}
-
-void
 fs_visitor::nir_setup_outputs()
 {
    if (stage == MESA_SHADER_TESS_CTRL || stage == MESA_SHADER_FRAGMENT)
       return;
 
-   nir_outputs = bld.vgrf(BRW_REGISTER_TYPE_F, nir->num_outputs);
-
    nir_foreach_variable(var, &nir->outputs) {
-      switch (stage) {
-      case MESA_SHADER_VERTEX:
-      case MESA_SHADER_TESS_EVAL:
-      case MESA_SHADER_GEOMETRY: {
-         fs_reg reg = offset(nir_outputs, bld, var->data.driver_location);
-         unsigned location = var->data.location;
-         nir_setup_single_output_varying(&reg, var->type, &location);
-         break;
-      }
-      default:
-         unreachable("unhandled shader stage");
+      const unsigned vec4s = type_size_vec4(var->type);
+      fs_reg reg = bld.vgrf(BRW_REGISTER_TYPE_F, 4 * vec4s);
+      for (unsigned i = 0; i < vec4s; i++) {
+         if (outputs[var->data.driver_location + i].file == BAD_FILE)
+            outputs[var->data.driver_location + i] = offset(reg, bld, 4 * i);
       }
    }
 }
@@ -1202,35 +1164,6 @@ fs_visitor::nir_emit_alu(const fs_builder &bld, nir_alu_instr *instr)
       break;
 
    case nir_op_pack_double_2x32_split:
-      /* Optimize the common case where we are re-packing a double with
-       * the result of a previous double unpack. In this case we can take the
-       * 32-bit value to use in the re-pack from the original double and bypass
-       * the unpack operation.
-       */
-      for (int i = 0; i < 2; i++) {
-         if (instr->src[i].src.is_ssa)
-            continue;
-
-         const nir_instr *parent_instr = instr->src[i].src.ssa->parent_instr;
-         if (parent_instr->type == nir_instr_type_alu)
-            continue;
-
-         const nir_alu_instr *alu_parent = nir_instr_as_alu(parent_instr);
-         if (alu_parent->op == nir_op_unpack_double_2x32_split_x ||
-             alu_parent->op == nir_op_unpack_double_2x32_split_y)
-            continue;
-
-         if (!alu_parent->src[0].src.is_ssa)
-            continue;
-
-         op[i] = get_nir_src(alu_parent->src[0].src);
-         op[i] = offset(retype(op[i], BRW_REGISTER_TYPE_DF), bld,
-                        alu_parent->src[0].swizzle[channel]);
-         if (alu_parent->op == nir_op_unpack_double_2x32_split_y)
-            op[i] = subscript(op[i], BRW_REGISTER_TYPE_UD, 1);
-         else
-            op[i] = subscript(op[i], BRW_REGISTER_TYPE_UD, 0);
-      }
       bld.emit(FS_OPCODE_PACK, result, op[0], op[1]);
       break;
 
@@ -2022,7 +1955,7 @@ fs_visitor::emit_gs_input_load(const fs_reg &dst,
       } else {
          for (unsigned i = 0; i < num_components; i++) {
             bld.MOV(offset(dst, bld, i),
-                    fs_reg(ATTR, imm_offset + i, dst.type));
+                    fs_reg(ATTR, imm_offset + i + first_component, dst.type));
          }
       }
       return;
@@ -2072,7 +2005,7 @@ fs_visitor::emit_gs_input_load(const fs_reg &dst,
           * we might read up to nir->info.gs.vertices_in registers.
           */
          bld.emit(SHADER_OPCODE_MOV_INDIRECT, icp_handle,
-                  fs_reg(brw_vec8_grf(first_icp_handle, 0)),
+                  retype(brw_vec8_grf(first_icp_handle, 0), icp_handle.type),
                   fs_reg(icp_offset_bytes),
                   brw_imm_ud(nir->info.gs.vertices_in * REG_SIZE));
       }
@@ -2103,7 +2036,7 @@ fs_visitor::emit_gs_input_load(const fs_reg &dst,
           * we might read up to ceil(nir->info.gs.vertices_in / 8) registers.
           */
          bld.emit(SHADER_OPCODE_MOV_INDIRECT, icp_handle,
-                  fs_reg(brw_vec8_grf(first_icp_handle, 0)),
+                  retype(brw_vec8_grf(first_icp_handle, 0), icp_handle.type),
                   fs_reg(icp_offset_bytes),
                   brw_imm_ud(DIV_ROUND_UP(nir->info.gs.vertices_in, 8) *
                              REG_SIZE));
@@ -2443,7 +2376,7 @@ fs_visitor::nir_emit_tcs_intrinsic(const fs_builder &bld,
 
          /* Start at g1.  We might read up to 4 registers. */
          bld.emit(SHADER_OPCODE_MOV_INDIRECT, icp_handle,
-                  fs_reg(brw_vec8_grf(1, 0)), vertex_offset_bytes,
+                  retype(brw_vec8_grf(1, 0), icp_handle.type), vertex_offset_bytes,
                   brw_imm_ud(4 * REG_SIZE));
       }
 
@@ -4014,31 +3947,30 @@ fs_visitor::nir_emit_intrinsic(const fs_builder &bld, nir_intrinsic_instr *instr
          unsigned read_size = instr->const_index[1] -
             (instr->num_components - 1) * type_sz(dest.type);
 
-         fs_reg indirect_chv_high_32bit;
-         bool is_chv_bxt_64bit =
-            (devinfo->is_cherryview || devinfo->is_broxton) &&
-            type_sz(dest.type) == 8;
-         if (is_chv_bxt_64bit) {
-            indirect_chv_high_32bit = vgrf(glsl_type::uint_type);
-            /* Calculate indirect address to read high 32 bits */
-            bld.ADD(indirect_chv_high_32bit, indirect, brw_imm_ud(4));
-         }
+         bool supports_64bit_indirects =
+            !devinfo->is_cherryview && !devinfo->is_broxton;
 
-         for (unsigned j = 0; j < instr->num_components; j++) {
-            if (!is_chv_bxt_64bit) {
+         if (type_sz(dest.type) != 8 || supports_64bit_indirects) {
+            for (unsigned j = 0; j < instr->num_components; j++) {
                bld.emit(SHADER_OPCODE_MOV_INDIRECT,
                         offset(dest, bld, j), offset(src, bld, j),
                         indirect, brw_imm_ud(read_size));
-            } else {
-               bld.emit(SHADER_OPCODE_MOV_INDIRECT,
-                        subscript(offset(dest, bld, j), BRW_REGISTER_TYPE_UD, 0),
-                        offset(src, bld, j),
-                        indirect, brw_imm_ud(read_size));
-
-               bld.emit(SHADER_OPCODE_MOV_INDIRECT,
-                        subscript(offset(dest, bld, j), BRW_REGISTER_TYPE_UD, 1),
-                        offset(src, bld, j),
-                        indirect_chv_high_32bit, brw_imm_ud(read_size));
+            }
+         } else {
+            const unsigned num_mov_indirects =
+               type_sz(dest.type) / type_sz(BRW_REGISTER_TYPE_UD);
+            /* We read a little bit less per MOV INDIRECT, as they are now
+             * 32-bits ones instead of 64-bit. Fix read_size then.
+             */
+            const unsigned read_size_32bit = read_size -
+                (num_mov_indirects - 1) * type_sz(BRW_REGISTER_TYPE_UD);
+            for (unsigned j = 0; j < instr->num_components; j++) {
+               for (unsigned i = 0; i < num_mov_indirects; i++) {
+                  bld.emit(SHADER_OPCODE_MOV_INDIRECT,
+                           subscript(offset(dest, bld, j), BRW_REGISTER_TYPE_UD, i),
+                           subscript(offset(src, bld, j), BRW_REGISTER_TYPE_UD, i),
+                           indirect, brw_imm_ud(read_size_32bit));
+               }
             }
          }
       }
@@ -4251,12 +4183,11 @@ fs_visitor::nir_emit_intrinsic(const fs_builder &bld, nir_intrinsic_instr *instr
 
    case nir_intrinsic_store_output: {
       fs_reg src = get_nir_src(instr->src[0]);
-      fs_reg new_dest = offset(retype(nir_outputs, src.type), bld,
-                               instr->const_index[0]);
 
       nir_const_value *const_offset = nir_src_as_const_value(instr->src[1]);
       assert(const_offset && "Indirect output stores not allowed");
-      new_dest = offset(new_dest, bld, const_offset->u32[0]);
+      fs_reg new_dest = retype(offset(outputs[instr->const_index[0]], bld,
+                                      4 * const_offset->u32[0]), src.type);
 
       unsigned num_components = instr->num_components;
       unsigned first_component = nir_intrinsic_component(instr);

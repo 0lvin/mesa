@@ -52,7 +52,8 @@ static void
 brw_blorp_upload_shader(struct blorp_context *blorp,
                         const void *key, uint32_t key_size,
                         const void *kernel, uint32_t kernel_size,
-                        const void *prog_data, uint32_t prog_data_size,
+                        const struct brw_stage_prog_data *prog_data,
+                        uint32_t prog_data_size,
                         uint32_t *kernel_out, void *prog_data_out)
 {
    struct brw_context *brw = blorp->driver_ctx;
@@ -238,8 +239,10 @@ brw_blorp_to_isl_format(struct brw_context *brw, mesa_format format,
    case MESA_FORMAT_S_UINT8:
       return ISL_FORMAT_R8_UINT;
    case MESA_FORMAT_Z24_UNORM_X8_UINT:
+   case MESA_FORMAT_Z24_UNORM_S8_UINT:
       return ISL_FORMAT_R24_UNORM_X8_TYPELESS;
    case MESA_FORMAT_Z_FLOAT32:
+   case MESA_FORMAT_Z32_FLOAT_S8X24_UINT:
       return ISL_FORMAT_R32_FLOAT;
    case MESA_FORMAT_Z_UNORM16:
       return ISL_FORMAT_R16_UNORM;

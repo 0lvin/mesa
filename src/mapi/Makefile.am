@@ -46,8 +46,8 @@ AM_CPPFLAGS =							\
 	$(SELINUX_CFLAGS)					\
 	-I$(top_srcdir)/include					\
 	-I$(top_srcdir)/src					\
-	-I$(top_srcdir)/src/mapi				\
-	-I$(top_builddir)/src/mapi
+	-I$(top_builddir)/src/mapi				\
+	-I$(top_srcdir)/src/mapi
 
 include Makefile.sources
 
@@ -64,6 +64,9 @@ BUILT_SOURCES += shared-glapi/glapi_mapi_tmp.h
 
 lib_LTLIBRARIES += shared-glapi/libglapi.la
 shared_glapi_libglapi_la_SOURCES = $(MAPI_GLAPI_FILES) shared-glapi/glapi_mapi_tmp.h
+shared_glapi_libglapi_la_CFLAGS = \
+	$(AM_CFLAGS) \
+	$(VISIBILITY_CFLAGS)
 shared_glapi_libglapi_la_CPPFLAGS = \
 	$(AM_CPPFLAGS) \
 	-DMAPI_MODE_GLAPI \

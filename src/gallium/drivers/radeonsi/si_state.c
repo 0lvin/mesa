@@ -453,8 +453,14 @@ static void *si_create_blend_state_mode(struct pipe_context *ctx,
 			S_028760_ALPHA_COMB_FCN(V_028760_OPT_COMB_BLEND_DISABLED);
 
 		/* Only set dual source blending for MRT0 to avoid a hang. */
-		if (i >= 1 && blend->dual_src_blend)
+		if (i >= 1 && blend->dual_src_blend) {
+			/* Vulkan does this for dual source blending. */
+			if (i == 1)
+				blend_cntl |= S_028780_ENABLE(1);
+
+			si_pm4_set_reg(pm4, R_028780_CB_BLEND0_CONTROL + i * 4, blend_cntl);
 			continue;
+		}
 
 		/* Only addition and subtraction equations are supported with
 		 * dual source blending.
@@ -463,16 +469,14 @@ static void *si_create_blend_state_mode(struct pipe_context *ctx,
 		    (eqRGB == PIPE_BLEND_MIN || eqRGB == PIPE_BLEND_MAX ||
 		     eqA == PIPE_BLEND_MIN || eqA == PIPE_BLEND_MAX)) {
 			assert(!"Unsupported equation for dual source blending");
+			si_pm4_set_reg(pm4, R_028780_CB_BLEND0_CONTROL + i * 4, blend_cntl);
 			continue;
 		}
-
-		if (!state->rt[j].colormask)
-			continue;
 
 		/* cb_render_state will disable unused ones */
 		blend->cb_target_mask |= (unsigned)state->rt[j].colormask << (4 * i);
 
-		if (!state->rt[j].blend_enable) {
+		if (!state->rt[j].colormask || !state->rt[j].blend_enable) {
 			si_pm4_set_reg(pm4, R_028780_CB_BLEND0_CONTROL + i * 4, blend_cntl);
 			continue;
 		}
@@ -553,6 +557,17 @@ static void *si_create_blend_state_mode(struct pipe_context *ctx,
 	}
 
 	if (sctx->b.family == CHIP_STONEY) {
+		/* Disable RB+ blend optimizations for dual source blending.
+		 * Vulkan does this.
+		 */
+		if (blend->dual_src_blend) {
+			for (int i = 0; i < 8; i++) {
+				sx_mrt_blend_opt[i] =
+					S_028760_COLOR_COMB_FCN(V_028760_OPT_COMB_NONE) |
+					S_028760_ALPHA_COMB_FCN(V_028760_OPT_COMB_NONE);
+			}
+		}
+
 		for (int i = 0; i < 8; i++)
 			si_pm4_set_reg(pm4, R_028760_SX_MRT0_BLEND_OPT + i * 4,
 				       sx_mrt_blend_opt[i]);
@@ -683,8 +698,10 @@ static void si_update_poly_offset_state(struct si_context *sctx)
 {
 	struct si_state_rasterizer *rs = sctx->queued.named.rasterizer;
 
-	if (!rs || !rs->uses_poly_offset || !sctx->framebuffer.state.zsbuf)
+	if (!rs || !rs->uses_poly_offset || !sctx->framebuffer.state.zsbuf) {
+		si_pm4_bind_state(sctx, poly_offset, NULL);
 		return;
+	}
 
 	/* Use the user format, not db_render_format, so that the polygon
 	 * offset behaves as expected by applications.
@@ -1328,11 +1345,17 @@ static uint32_t si_translate_texformat(struct pipe_screen *screen,
 		case PIPE_FORMAT_Z16_UNORM:
 			return V_008F14_IMG_DATA_FORMAT_16;
 		case PIPE_FORMAT_X24S8_UINT:
+		case PIPE_FORMAT_S8X24_UINT:
+			/*
+			 * Implemented as an 8_8_8_8 data format to fix texture
+			 * gathers in stencil sampling. This affects at least
+			 * GL45-CTS.texture_cube_map_array.sampling on VI.
+			 */
+			return V_008F14_IMG_DATA_FORMAT_8_8_8_8;
 		case PIPE_FORMAT_Z24X8_UNORM:
 		case PIPE_FORMAT_Z24_UNORM_S8_UINT:
 			return V_008F14_IMG_DATA_FORMAT_8_24;
 		case PIPE_FORMAT_X8Z24_UNORM:
-		case PIPE_FORMAT_S8X24_UINT:
 		case PIPE_FORMAT_S8_UINT_Z24_UNORM:
 			return V_008F14_IMG_DATA_FORMAT_24_8;
 		case PIPE_FORMAT_S8_UINT:
@@ -2061,11 +2084,15 @@ static void si_initialize_color_surface(struct si_context *sctx,
 		blend_bypass = 1;
 	}
 
-	if ((ntype == V_028C70_NUMBER_UINT || ntype == V_028C70_NUMBER_SINT) &&
-	    (format == V_028C70_COLOR_8 ||
-	     format == V_028C70_COLOR_8_8 ||
-	     format == V_028C70_COLOR_8_8_8_8))
-		surf->color_is_int8 = true;
+	if (ntype == V_028C70_NUMBER_UINT || ntype == V_028C70_NUMBER_SINT) {
+		if (format == V_028C70_COLOR_8 ||
+		    format == V_028C70_COLOR_8_8 ||
+		    format == V_028C70_COLOR_8_8_8_8)
+			surf->color_is_int8 = true;
+		else if (format == V_028C70_COLOR_10_10_10_2 ||
+			 format == V_028C70_COLOR_2_10_10_10)
+			surf->color_is_int10 = true;
+	}
 
 	color_info = S_028C70_FORMAT(format) |
 		S_028C70_COMP_SWAP(swap) |
@@ -2327,6 +2354,7 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
 	sctx->framebuffer.spi_shader_col_format_blend = 0;
 	sctx->framebuffer.spi_shader_col_format_blend_alpha = 0;
 	sctx->framebuffer.color_is_int8 = 0;
+	sctx->framebuffer.color_is_int10 = 0;
 
 	sctx->framebuffer.compressed_cb_mask = 0;
 	sctx->framebuffer.nr_samples = util_framebuffer_get_num_samples(state);
@@ -2355,6 +2383,8 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
 
 		if (surf->color_is_int8)
 			sctx->framebuffer.color_is_int8 |= 1 << i;
+		if (surf->color_is_int10)
+			sctx->framebuffer.color_is_int10 |= 1 << i;
 
 		if (rtex->fmask.size && rtex->cmask.size) {
 			sctx->framebuffer.compressed_cb_mask |= 1 << i;
@@ -2735,13 +2765,21 @@ si_make_texture_descriptor(struct si_screen *screen,
 	if (desc->colorspace == UTIL_FORMAT_COLORSPACE_ZS) {
 		const unsigned char swizzle_xxxx[4] = {0, 0, 0, 0};
 		const unsigned char swizzle_yyyy[4] = {1, 1, 1, 1};
+		const unsigned char swizzle_wwww[4] = {3, 3, 3, 3};
 
 		switch (pipe_format) {
 		case PIPE_FORMAT_S8_UINT_Z24_UNORM:
-		case PIPE_FORMAT_X24S8_UINT:
 		case PIPE_FORMAT_X32_S8X24_UINT:
 		case PIPE_FORMAT_X8Z24_UNORM:
 			util_format_compose_swizzles(swizzle_yyyy, state_swizzle, swizzle);
+			break;
+		case PIPE_FORMAT_X24S8_UINT:
+			/*
+			 * X24S8 is implemented as an 8_8_8_8 data format, to
+			 * fix texture gathers. This affects at least
+			 * GL45-CTS.texture_cube_map_array.sampling on VI.
+			 */
+			util_format_compose_swizzles(swizzle_wwww, state_swizzle, swizzle);
 			break;
 		default:
 			util_format_compose_swizzles(swizzle_xxxx, state_swizzle, swizzle);
@@ -3925,6 +3963,14 @@ static void si_init_config(struct si_context *sctx)
 	si_pm4_set_reg(pm4, R_028408_VGT_INDX_OFFSET, 0);
 
 	if (sctx->b.chip_class >= CIK) {
+		/* If this is 0, Bonaire can hang even if GS isn't being used.
+		 * Other chips are unaffected. These are suboptimal values,
+		 * but we don't use on-chip GS.
+		 */
+		si_pm4_set_reg(pm4, R_028A44_VGT_GS_ONCHIP_CNTL,
+			       S_028A44_ES_VERTS_PER_SUBGRP(64) |
+			       S_028A44_GS_PRIMS_PER_SUBGRP(4));
+
 		si_pm4_set_reg(pm4, R_00B51C_SPI_SHADER_PGM_RSRC3_LS, S_00B51C_CU_EN(0xffff));
 		si_pm4_set_reg(pm4, R_00B41C_SPI_SHADER_PGM_RSRC3_HS, 0);
 		si_pm4_set_reg(pm4, R_00B31C_SPI_SHADER_PGM_RSRC3_ES, S_00B31C_CU_EN(0xffff));

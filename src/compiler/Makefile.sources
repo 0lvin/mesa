@@ -28,6 +28,8 @@ LIBGLSL_FILES = \
 	glsl/glsl_to_nir.cpp \
 	glsl/glsl_to_nir.h \
 	glsl/hir_field_selection.cpp \
+	glsl/ir_array_refcount.cpp \
+	glsl/ir_array_refcount.h \
 	glsl/ir_basic_block.cpp \
 	glsl/ir_basic_block.h \
 	glsl/ir_builder.cpp \
@@ -227,6 +229,7 @@ NIR_FILES = \
 	nir/nir_metadata.c \
 	nir/nir_move_vec_src_uses_to_dest.c \
 	nir/nir_normalize_cubemap_coords.c \
+	nir/nir_opt_conditional_discard.c \
 	nir/nir_opt_constant_folding.c \
 	nir/nir_opt_copy_propagate.c \
 	nir/nir_opt_cse.c \

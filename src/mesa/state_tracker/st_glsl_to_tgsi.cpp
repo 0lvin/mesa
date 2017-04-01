@@ -55,6 +55,7 @@
 #include "st_glsl_types.h"
 #include "st_nir.h"
 
+#include <algorithm>
 
 #define PROGRAM_ANY_CONST ((1 << PROGRAM_STATE_VAR) |    \
                            (1 << PROGRAM_CONSTANT) |     \
@@ -771,16 +772,15 @@ glsl_to_tgsi_visitor::emit_asm(ir_instruction *ir, unsigned op,
 
          int i = u_bit_scan(&writemask);
 
-         /* before emitting the instruction, see if we have to adjust store
+         /* before emitting the instruction, see if we have to adjust load / store
           * address */
-         if (i > 1 && inst->op == TGSI_OPCODE_STORE &&
+         if (i > 1 && (inst->op == TGSI_OPCODE_LOAD || inst->op == TGSI_OPCODE_STORE) &&
              addr.file == PROGRAM_UNDEFINED) {
             /* We have to advance the buffer address by 16 */
             addr = get_temp(glsl_type::uint_type);
             emit_asm(ir, TGSI_OPCODE_UADD, st_dst_reg(addr),
                      inst->src[0], st_src_reg_for_int(16));
          }
-
 
          /* first time use previous instruction */
          if (dinst == NULL) {
@@ -801,11 +801,10 @@ glsl_to_tgsi_visitor::emit_asm(ir_instruction *ir, unsigned op,
                dinst->dst[j].writemask = (i & 1) ? WRITEMASK_ZW : WRITEMASK_XY;
                dinst->dst[j].index = initial_dst_idx[j];
                if (i > 1) {
-                  if (dinst->op == TGSI_OPCODE_STORE) {
+                  if (dinst->op == TGSI_OPCODE_LOAD || dinst->op == TGSI_OPCODE_STORE)
                      dinst->src[0] = addr;
-                  } else {
+                  if (dinst->op != TGSI_OPCODE_STORE)
                      dinst->dst[j].index++;
-                  }
                }
             } else {
                /* if we aren't writing to a double, just get the bit of the initial writemask
@@ -2880,6 +2879,7 @@ glsl_to_tgsi_visitor::emit_block_mov(ir_assignment *ir, const struct glsl_type *
 
    assert(type->is_scalar() || type->is_vector());
 
+   l->type = type->base_type;
    r->type = type->base_type;
    if (cond) {
       st_src_reg l_src = st_src_reg(*l);
@@ -2940,10 +2940,12 @@ glsl_to_tgsi_visitor::visit(ir_assignment *ir)
       } else if (ir->write_mask == 0) {
          assert(!ir->lhs->type->is_scalar() && !ir->lhs->type->is_vector());
 
-         if (ir->lhs->type->is_array() || ir->lhs->type->is_matrix()) {
-            unsigned num_elements = ir->lhs->type->without_array()->vector_elements;
+         unsigned num_elements = ir->lhs->type->without_array()->vector_elements;
+
+         if (num_elements) {
             l.writemask = u_bit_consecutive(0, num_elements);
          } else {
+            /* The type is a struct or an array of (array of) structs. */
             l.writemask = WRITEMASK_XYZW;
          }
       } else {
@@ -3378,10 +3380,17 @@ glsl_to_tgsi_visitor::visit_ssbo_intrinsic(ir_call *ir)
       inst->resource = buffer;
       if (access)
          inst->buffer_access = access->value.u[0];
+
+      if (inst == this->instructions.get_head_raw())
+         break;
       inst = (glsl_to_tgsi_instruction *)inst->get_prev();
-      if (inst->op == TGSI_OPCODE_UADD)
+
+      if (inst->op == TGSI_OPCODE_UADD) {
+         if (inst == this->instructions.get_head_raw())
+            break;
          inst = (glsl_to_tgsi_instruction *)inst->get_prev();
-   } while (inst && inst->op == op && inst->resource.file == PROGRAM_UNDEFINED);
+      }
+   } while (inst->op == op && inst->resource.file == PROGRAM_UNDEFINED);
 }
 
 void
@@ -5870,6 +5879,29 @@ emit_compute_block_size(const struct gl_program *program,
                        cp->LocalSize[2]);
 }
 
+struct sort_inout_decls {
+   bool operator()(const struct inout_decl &a, const struct inout_decl &b) const {
+      return mapping[a.mesa_index] < mapping[b.mesa_index];
+   }
+
+   const GLuint *mapping;
+};
+
+/* Sort the given array of decls by the corresponding slot (TGSI file index).
+ *
+ * This is for the benefit of older drivers which are broken when the
+ * declarations aren't sorted in this way.
+ */
+static void
+sort_inout_decls_by_slot(struct inout_decl *decls,
+                         unsigned count,
+                         const GLuint mapping[])
+{
+   sort_inout_decls sorter;
+   sorter.mapping = mapping;
+   std::sort(decls, decls + count, sorter);
+}
+
 /**
  * Translate intermediate IR (glsl_to_tgsi_instruction) to TGSI format.
  * \param program  the program to translate
@@ -5942,6 +5974,8 @@ st_translate_program(
    case PIPE_SHADER_GEOMETRY:
    case PIPE_SHADER_TESS_EVAL:
    case PIPE_SHADER_TESS_CTRL:
+      sort_inout_decls_by_slot(program->inputs, program->num_inputs, inputMapping);
+
       for (i = 0; i < program->num_inputs; ++i) {
          struct inout_decl *decl = &program->inputs[i];
          unsigned slot = inputMapping[decl->mesa_index];
@@ -5994,6 +6028,8 @@ st_translate_program(
    case PIPE_SHADER_TESS_EVAL:
    case PIPE_SHADER_TESS_CTRL:
    case PIPE_SHADER_VERTEX:
+      sort_inout_decls_by_slot(program->outputs, program->num_outputs, outputMapping);
+
       for (i = 0; i < program->num_outputs; ++i) {
          struct inout_decl *decl = &program->outputs[i];
          unsigned slot = outputMapping[decl->mesa_index];

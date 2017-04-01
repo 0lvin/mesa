@@ -40,7 +40,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = \
 	--enable-vdpau \
 	--enable-xa \
 	--enable-xvmc \
-	--disable-llvm-shared-libs \
+	--enable-llvm-shared-libs \
 	--with-egl-platforms=x11,wayland,drm,surfaceless \
 	--with-dri-drivers=i915,i965,nouveau,radeon,r200,swrast \
 	--with-gallium-drivers=i915,ilo,nouveau,r300,r600,radeonsi,freedreno,svga,swrast,vc4,virgl,swr \
@@ -62,6 +62,7 @@ noinst_HEADERS = \
 	include/c99_math.h \
 	include/c11 \
 	include/D3D9 \
+	include/GL/wglext.h \
 	include/HaikuGL \
 	include/no_extern_c.h \
 	include/pci_ids

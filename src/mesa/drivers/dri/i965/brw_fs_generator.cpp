@@ -400,36 +400,35 @@ fs_generator::generate_mov_indirect(fs_inst *inst,
       indirect_byte_offset =
          retype(spread(indirect_byte_offset, 2), BRW_REGISTER_TYPE_UW);
 
-      struct brw_reg ind_src;
-      if (devinfo->gen < 8) {
-         /* From the Haswell PRM section "Register Region Restrictions":
-          *
-          *    "The lower bits of the AddressImmediate must not overflow to
-          *    change the register address.  The lower 5 bits of Address
-          *    Immediate when added to lower 5 bits of address register gives
-          *    the sub-register offset. The upper bits of Address Immediate
-          *    when added to upper bits of address register gives the register
-          *    address. Any overflow from sub-register offset is dropped."
-          *
-          * This restriction is only listed in the Haswell PRM but emperical
-          * testing indicates that it applies on all older generations and is
-          * lifted on Broadwell.
-          *
-          * Since the indirect may cause us to cross a register boundary, this
-          * makes the base offset almost useless.  We could try and do
-          * something clever where we use a actual base offset if
-          * base_offset % 32 == 0 but that would mean we were generating
-          * different code depending on the base offset.  Instead, for the
-          * sake of consistency, we'll just do the add ourselves.
-          */
-         brw_ADD(p, addr, indirect_byte_offset, brw_imm_uw(imm_byte_offset));
-         ind_src = brw_VxH_indirect(0, 0);
-      } else {
-         brw_MOV(p, addr, indirect_byte_offset);
-         ind_src = brw_VxH_indirect(0, imm_byte_offset);
-      }
+      /* There are a number of reasons why we don't use the base offset here.
+       * One reason is that the field is only 9 bits which means we can only
+       * use it to access the first 16 GRFs.  Also, from the Haswell PRM
+       * section "Register Region Restrictions":
+       *
+       *    "The lower bits of the AddressImmediate must not overflow to
+       *    change the register address.  The lower 5 bits of Address
+       *    Immediate when added to lower 5 bits of address register gives
+       *    the sub-register offset. The upper bits of Address Immediate
+       *    when added to upper bits of address register gives the register
+       *    address. Any overflow from sub-register offset is dropped."
+       *
+       * Since the indirect may cause us to cross a register boundary, this
+       * makes the base offset almost useless.  We could try and do something
+       * clever where we use a actual base offset if base_offset % 32 == 0 but
+       * that would mean we were generating different code depending on the
+       * base offset.  Instead, for the sake of consistency, we'll just do the
+       * add ourselves.  This restriction is only listed in the Haswell PRM
+       * but empirical testing indicates that it applies on all older
+       * generations and is lifted on Broadwell.
+       *
+       * In the end, while base_offset is nice to look at in the generated
+       * code, using it saves us 0 instructions and would require quite a bit
+       * of case-by-case work.  It's just not worth it.
+       */
+      brw_ADD(p, addr, indirect_byte_offset, brw_imm_uw(imm_byte_offset));
+      struct brw_reg ind_src = brw_VxH_indirect(0, 0);
 
-      brw_inst *mov = brw_MOV(p, dst, retype(ind_src, dst.type));
+      brw_inst *mov = brw_MOV(p, dst, retype(ind_src, reg.type));
 
       if (devinfo->gen == 6 && dst.file == BRW_MESSAGE_REGISTER_FILE &&
           !inst->get_next()->is_tail_sentinel() &&
@@ -509,7 +508,7 @@ fs_generator::generate_cs_terminate(fs_inst *inst, struct brw_reg payload)
    insn = brw_next_insn(p, BRW_OPCODE_SEND);
 
    brw_set_dest(p, insn, retype(brw_null_reg(), BRW_REGISTER_TYPE_UW));
-   brw_set_src0(p, insn, payload);
+   brw_set_src0(p, insn, retype(payload, BRW_REGISTER_TYPE_UW));
    brw_set_src1(p, insn, brw_imm_d(0));
 
    /* Terminate a compute shader by sending a message to the thread spawner.
@@ -917,8 +916,12 @@ fs_generator::generate_tex(fs_inst *inst, struct brw_reg dst, struct brw_reg src
       if (brw_regs_equal(&surface_reg, &sampler_reg)) {
          brw_MUL(p, addr, sampler_reg, brw_imm_uw(0x101));
       } else {
-         brw_SHL(p, addr, sampler_reg, brw_imm_ud(8));
-         brw_OR(p, addr, addr, surface_reg);
+         if (sampler_reg.file == BRW_IMMEDIATE_VALUE) {
+            brw_OR(p, addr, surface_reg, brw_imm_ud(sampler_reg.ud << 8));
+         } else {
+            brw_SHL(p, addr, sampler_reg, brw_imm_ud(8));
+            brw_OR(p, addr, addr, surface_reg);
+         }
       }
       if (base_binding_table_index)
          brw_ADD(p, addr, addr, brw_imm_ud(base_binding_table_index));

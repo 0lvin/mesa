@@ -538,6 +538,12 @@ compute_shader(const _mesa_glsl_parse_state *state)
 }
 
 static bool
+compute_shader_supported(const _mesa_glsl_parse_state *state)
+{
+   return state->has_compute_shader();
+}
+
+static bool
 buffer_atomics_supported(const _mesa_glsl_parse_state *state)
 {
    return compute_shader(state) || shader_storage_buffer_object(state);
@@ -1098,15 +1104,15 @@ builtin_builder::create_intrinsics()
                                           ir_intrinsic_group_memory_barrier),
                 NULL);
    add_function("__intrinsic_memory_barrier_atomic_counter",
-                _memory_barrier_intrinsic(compute_shader,
+                _memory_barrier_intrinsic(compute_shader_supported,
                                           ir_intrinsic_memory_barrier_atomic_counter),
                 NULL);
    add_function("__intrinsic_memory_barrier_buffer",
-                _memory_barrier_intrinsic(compute_shader,
+                _memory_barrier_intrinsic(compute_shader_supported,
                                           ir_intrinsic_memory_barrier_buffer),
                 NULL);
    add_function("__intrinsic_memory_barrier_image",
-                _memory_barrier_intrinsic(compute_shader,
+                _memory_barrier_intrinsic(compute_shader_supported,
                                           ir_intrinsic_memory_barrier_image),
                 NULL);
    add_function("__intrinsic_memory_barrier_shared",
@@ -2967,15 +2973,15 @@ builtin_builder::create_builtins()
                 NULL);
    add_function("memoryBarrierAtomicCounter",
                 _memory_barrier("__intrinsic_memory_barrier_atomic_counter",
-                                compute_shader),
+                                compute_shader_supported),
                 NULL);
    add_function("memoryBarrierBuffer",
                 _memory_barrier("__intrinsic_memory_barrier_buffer",
-                                compute_shader),
+                                compute_shader_supported),
                 NULL);
    add_function("memoryBarrierImage",
                 _memory_barrier("__intrinsic_memory_barrier_image",
-                                compute_shader),
+                                compute_shader_supported),
                 NULL);
    add_function("memoryBarrierShared",
                 _memory_barrier("__intrinsic_memory_barrier_shared",
@@ -3563,9 +3569,17 @@ builtin_builder::_tanh(const glsl_type *type)
    ir_variable *x = in_var(type, "x");
    MAKE_SIG(type, v130, 1, x);
 
+   /* Clamp x to [-10, +10] to avoid precision problems.
+    * When x > 10, e^(-x) is so small relative to e^x that it gets flushed to
+    * zero in the computation e^x + e^(-x). The same happens in the other
+    * direction when x < -10.
+    */
+   ir_variable *t = body.make_temp(type, "tmp");
+   body.emit(assign(t, min2(max2(x, imm(-10.0f)), imm(10.0f))));
+
    /* (e^x - e^(-x)) / (e^x + e^(-x)) */
-   body.emit(ret(div(sub(exp(x), exp(neg(x))),
-                     add(exp(x), exp(neg(x))))));
+   body.emit(ret(div(sub(exp(t), exp(neg(t))),
+                     add(exp(t), exp(neg(t))))));
 
    return sig;
 }

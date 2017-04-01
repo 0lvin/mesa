@@ -200,6 +200,9 @@ void anv_DestroyDescriptorSetLayout(
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_descriptor_set_layout, set_layout, _set_layout);
 
+   if (!set_layout)
+      return;
+
    vk_free2(&device->alloc, pAllocator, set_layout);
 }
 
@@ -282,6 +285,9 @@ void anv_DestroyPipelineLayout(
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_pipeline_layout, pipeline_layout, _pipelineLayout);
 
+   if (!pipeline_layout)
+      return;
+
    vk_free2(&device->alloc, pAllocator, pipeline_layout);
 }
 
@@ -323,18 +329,18 @@ VkResult anv_CreateDescriptorPool(
       }
    }
 
-   const size_t size =
-      sizeof(*pool) +
+   const size_t pool_size =
       pCreateInfo->maxSets * sizeof(struct anv_descriptor_set) +
       descriptor_count * sizeof(struct anv_descriptor) +
       buffer_count * sizeof(struct anv_buffer_view);
+   const size_t total_size = sizeof(*pool) + pool_size;
 
-   pool = vk_alloc2(&device->alloc, pAllocator, size, 8,
+   pool = vk_alloc2(&device->alloc, pAllocator, total_size, 8,
                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!pool)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   pool->size = size;
+   pool->size = pool_size;
    pool->next = 0;
    pool->free_list = EMPTY;
 
@@ -354,6 +360,9 @@ void anv_DestroyDescriptorPool(
 {
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_descriptor_pool, pool, _pool);
+
+   if (!pool)
+      return;
 
    anv_state_stream_finish(&pool->surface_state_stream);
    vk_free2(&device->alloc, pAllocator, pool);
@@ -489,6 +498,7 @@ anv_descriptor_set_destroy(struct anv_device *device,
       struct surface_state_free_list_entry *entry =
          set->buffer_views[b].surface_state.map;
       entry->next = pool->surface_state_free_list;
+      entry->offset = set->buffer_views[b].surface_state.offset;
       pool->surface_state_free_list = entry;
    }
 
@@ -545,6 +555,9 @@ VkResult anv_FreeDescriptorSets(
 
    for (uint32_t i = 0; i < count; i++) {
       ANV_FROM_HANDLE(anv_descriptor_set, set, pDescriptorSets[i]);
+
+      if (!set)
+         continue;
 
       anv_descriptor_set_destroy(device, pool, set);
    }

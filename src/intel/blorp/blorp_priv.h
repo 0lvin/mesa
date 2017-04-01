@@ -138,33 +138,8 @@ struct brw_blorp_wm_inputs
    uint32_t pad[1];
 };
 
-struct brw_blorp_prog_data
-{
-   bool dispatch_8;
-   bool dispatch_16;
-
-   uint8_t first_curbe_grf_0;
-   uint8_t first_curbe_grf_2;
-
-   uint32_t ksp_offset_2;
-
-   /**
-    * True if the WM program should be run in MSDISPMODE_PERSAMPLE with more
-    * than one sample per pixel.
-    */
-   bool persample_msaa_dispatch;
-
-   /**
-    * Mask of which FS inputs are marked flat by the shader source.  This is
-    * needed for setting up 3DSTATE_SF/SBE.
-    */
-   uint32_t flat_inputs;
-   unsigned num_varying_inputs;
-   uint64_t inputs_read;
-};
-
 static inline unsigned
-brw_blorp_get_urb_length(const struct brw_blorp_prog_data *prog_data)
+brw_blorp_get_urb_length(const struct brw_wm_prog_data *prog_data)
 {
    if (prog_data == NULL)
       return 1;
@@ -197,7 +172,7 @@ struct blorp_params
    unsigned num_draw_buffers;
    unsigned num_layers;
    uint32_t wm_prog_kernel;
-   struct brw_blorp_prog_data *wm_prog_data;
+   struct brw_wm_prog_data *wm_prog_data;
 };
 
 void blorp_params_init(struct blorp_params *params);
@@ -310,11 +285,12 @@ struct brw_blorp_blit_prog_key
 void brw_blorp_init_wm_prog_key(struct brw_wm_prog_key *wm_key);
 
 const unsigned *
-brw_blorp_compile_nir_shader(struct blorp_context *blorp, struct nir_shader *nir,
-                             const struct brw_wm_prog_key *wm_key,
-                             bool use_repclear,
-                             struct brw_blorp_prog_data *prog_data,
-                             unsigned *program_size);
+blorp_compile_fs(struct blorp_context *blorp, void *mem_ctx,
+                 struct nir_shader *nir,
+                 const struct brw_wm_prog_key *wm_key,
+                 bool use_repclear,
+                 struct brw_wm_prog_data *wm_prog_data,
+                 unsigned *program_size);
 
 /** \} */
 

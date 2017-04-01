@@ -498,6 +498,7 @@ struct radv_descriptor_pool {
 	int free_list;
 	int full_list;
 	uint32_t max_sets;
+	uint32_t allocated_sets;
 	struct radv_descriptor_pool_free_node free_nodes[];
 };
 
@@ -1206,6 +1207,13 @@ void radv_initialise_cmask(struct radv_cmd_buffer *cmd_buffer,
 			   struct radv_image *image, uint32_t value);
 void radv_initialize_dcc(struct radv_cmd_buffer *cmd_buffer,
 			 struct radv_image *image, uint32_t value);
+
+struct radv_fence {
+	struct radeon_winsys_fence *fence;
+	bool submitted;
+	bool signalled;
+};
+
 #define RADV_DEFINE_HANDLE_CASTS(__radv_type, __VkType)		\
 								\
 	static inline struct __radv_type *			\

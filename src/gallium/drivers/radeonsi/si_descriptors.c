@@ -320,14 +320,21 @@ static void si_sampler_view_add_buffer(struct si_context *sctx,
 	if (resource->target == PIPE_BUFFER)
 		return;
 
-	/* Now add separate DCC if it's present. */
+	/* Now add separate DCC or HTILE. */
 	rtex = (struct r600_texture*)resource;
-	if (!rtex->dcc_separate_buffer)
-		return;
+	if (rtex->dcc_separate_buffer) {
+		radeon_add_to_buffer_list_check_mem(&sctx->b, &sctx->b.gfx,
+						    rtex->dcc_separate_buffer, usage,
+						    RADEON_PRIO_DCC, check_mem);
+	}
 
-	radeon_add_to_buffer_list_check_mem(&sctx->b, &sctx->b.gfx,
-					    rtex->dcc_separate_buffer, usage,
-					    RADEON_PRIO_DCC, check_mem);
+	if (rtex->htile_buffer &&
+	    rtex->tc_compatible_htile &&
+	    !is_stencil_sampler) {
+		radeon_add_to_buffer_list_check_mem(&sctx->b, &sctx->b.gfx,
+						    rtex->htile_buffer, usage,
+						    RADEON_PRIO_HTILE, check_mem);
+	}
 }
 
 static void si_sampler_views_begin_new_cs(struct si_context *sctx,
@@ -413,13 +420,13 @@ static void si_set_sampler_view(struct si_context *sctx,
 	struct si_sampler_views *views = &sctx->samplers[shader].views;
 	struct si_sampler_view *rview = (struct si_sampler_view*)view;
 	struct si_descriptors *descs = si_sampler_descriptors(sctx, shader);
+	uint32_t *desc = descs->list + slot * 16;
 
 	if (views->views[slot] == view && !disallow_early_out)
 		return;
 
 	if (view) {
 		struct r600_texture *rtex = (struct r600_texture *)view->texture;
-		uint32_t *desc = descs->list + slot * 16;
 
 		assert(rtex); /* views with texture == NULL aren't supported */
 		pipe_sampler_view_reference(&views->views[slot], view);
@@ -468,9 +475,14 @@ static void si_set_sampler_view(struct si_context *sctx,
 					   rview->is_stencil_sampler, true);
 	} else {
 		pipe_sampler_view_reference(&views->views[slot], NULL);
-		memcpy(descs->list + slot*16, null_texture_descriptor, 8*4);
+		memcpy(desc, null_texture_descriptor, 8*4);
 		/* Only clear the lower dwords of FMASK. */
-		memcpy(descs->list + slot*16 + 8, null_texture_descriptor, 4*4);
+		memcpy(desc + 8, null_texture_descriptor, 4*4);
+		/* Re-set the sampler state if we are transitioning from FMASK. */
+		if (views->sampler_states[slot])
+			memcpy(desc + 12,
+			       views->sampler_states[slot], 4*4);
+
 		views->enabled_mask &= ~(1u << slot);
 	}
 
@@ -632,7 +644,8 @@ si_mark_image_range_valid(const struct pipe_image_view *view)
 
 static void si_set_shader_image(struct si_context *ctx,
 				unsigned shader,
-				unsigned slot, const struct pipe_image_view *view)
+				unsigned slot, const struct pipe_image_view *view,
+				bool skip_decompress)
 {
 	struct si_screen *screen = ctx->screen;
 	struct si_images_info *images = &ctx->images[shader];
@@ -674,7 +687,7 @@ static void si_set_shader_image(struct si_context *ctx,
 		assert(!tex->is_depth);
 		assert(tex->fmask.size == 0);
 
-		if (uses_dcc &&
+		if (uses_dcc && !skip_decompress &&
 		    (view->access & PIPE_IMAGE_ACCESS_WRITE ||
 		     !vi_dcc_formats_compatible(res->b.b.format, view->format))) {
 			/* If DCC can't be disabled, at least decompress it.
@@ -748,10 +761,10 @@ si_set_shader_images(struct pipe_context *pipe,
 
 	if (views) {
 		for (i = 0, slot = start_slot; i < count; ++i, ++slot)
-			si_set_shader_image(ctx, shader, slot, &views[i]);
+			si_set_shader_image(ctx, shader, slot, &views[i], false);
 	} else {
 		for (i = 0, slot = start_slot; i < count; ++i, ++slot)
-			si_set_shader_image(ctx, shader, slot, NULL);
+			si_set_shader_image(ctx, shader, slot, NULL, false);
 	}
 }
 
@@ -803,10 +816,10 @@ static void si_bind_sampler_states(struct pipe_context *ctx,
 		/* If FMASK is bound, don't overwrite it.
 		 * The sampler state will be set after FMASK is unbound.
 		 */
-		if (samplers->views.views[i] &&
-		    samplers->views.views[i]->texture &&
-		    samplers->views.views[i]->texture->target != PIPE_BUFFER &&
-		    ((struct r600_texture*)samplers->views.views[i]->texture)->fmask.size)
+		if (samplers->views.views[slot] &&
+		    samplers->views.views[slot]->texture &&
+		    samplers->views.views[slot]->texture->target != PIPE_BUFFER &&
+		    ((struct r600_texture*)samplers->views.views[slot]->texture)->fmask.size)
 			continue;
 
 		memcpy(desc->list + slot * 16 + 12, sstates[i]->val, 4*4);
@@ -1187,6 +1200,9 @@ static void si_set_shader_buffers(struct pipe_context *ctx,
 		descs->dirty_mask |= 1u << slot;
 		sctx->descriptors_dirty |=
 			1u << si_shader_buffer_descriptors_idx(shader);
+
+		util_range_add(&buf->valid_buffer_range, sbuffer->buffer_offset,
+			       sbuffer->buffer_offset + sbuffer->buffer_size);
 	}
 }
 
@@ -1658,7 +1674,7 @@ void si_update_all_texture_descriptors(struct si_context *sctx)
 			    view->resource->target == PIPE_BUFFER)
 				continue;
 
-			si_set_shader_image(sctx, shader, i, view);
+			si_set_shader_image(sctx, shader, i, view, true);
 		}
 
 		/* Sampler views. */

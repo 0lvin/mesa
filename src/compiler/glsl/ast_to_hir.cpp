@@ -4330,6 +4330,8 @@ handle_tess_ctrl_shader_output_decl(struct _mesa_glsl_parse_state *state,
    if (var->data.patch)
       return;
 
+   var->data.tess_varying_implicit_sized_array = var->type->is_unsized_array();
+
    validate_layout_qualifier_vertex_count(state, loc, var, num_vertices,
                                           &state->tcs_output_size,
                                           "tessellation control shader output");
@@ -4366,6 +4368,7 @@ handle_tess_shader_input_decl(struct _mesa_glsl_parse_state *state,
    if (var->type->is_unsized_array()) {
       var->type = glsl_type::get_array_instance(var->type->fields.array,
             state->Const.MaxPatchVertices);
+      var->data.tess_varying_implicit_sized_array = true;
    } else if (var->type->length != state->Const.MaxPatchVertices) {
       _mesa_glsl_error(&loc, state,
                        "per-vertex tessellation shader input arrays must be "
@@ -5156,11 +5159,13 @@ ast_declarator_list::hir(exec_list *instructions,
           *     sized by an earlier input primitive layout qualifier, when
           *     present, as per the following table."
           */
+         const enum ir_variable_mode mode = (const enum ir_variable_mode)
+            (earlier == NULL ? var->data.mode : earlier->data.mode);
          const bool implicitly_sized =
-            (var->data.mode == ir_var_shader_in &&
+            (mode == ir_var_shader_in &&
              state->stage >= MESA_SHADER_TESS_CTRL &&
              state->stage <= MESA_SHADER_GEOMETRY) ||
-            (var->data.mode == ir_var_shader_out &&
+            (mode == ir_var_shader_out &&
              state->stage == MESA_SHADER_TESS_CTRL);
 
          if (t->is_unsized_array() && !implicitly_sized)
@@ -7795,10 +7800,9 @@ ast_interface_block::hir(exec_list *instructions,
          }
 
          if (var->type->is_unsized_array()) {
-            if (var->is_in_shader_storage_block()) {
-               if (is_unsized_array_last_element(var)) {
-                  var->data.from_ssbo_unsized_array = true;
-               }
+            if (var->is_in_shader_storage_block() &&
+                is_unsized_array_last_element(var)) {
+               var->data.from_ssbo_unsized_array = true;
             } else {
                /* From GLSL ES 3.10 spec, section 4.1.9 "Arrays":
                 *
@@ -7806,6 +7810,10 @@ ast_interface_block::hir(exec_list *instructions,
                 * block and the size is not specified at compile-time, it is
                 * sized at run-time. In all other cases, arrays are sized only
                 * at compile-time."
+                *
+                * In desktop GLSL it is allowed to have unsized-arrays that are
+                * not last, as long as we can determine that they are implicitly
+                * sized.
                 */
                if (state->es_shader) {
                   _mesa_glsl_error(&loc, state, "unsized array `%s' "

@@ -285,6 +285,8 @@ vc4_generate_code_block(struct vc4_compile *c,
                         [QOP_MOV] = { QPU_A_OR },
                         [QOP_FMOV] = { QPU_A_FMAX },
                         [QOP_MMOV] = { QPU_M_V8MIN },
+
+                        [QOP_MIN_NOIMM] = { QPU_A_MIN },
                 };
 
                 uint64_t unpack = 0;
@@ -565,9 +567,12 @@ vc4_generate_code_block(struct vc4_compile *c,
 void
 vc4_generate_code(struct vc4_context *vc4, struct vc4_compile *c)
 {
-        struct qpu_reg *temp_registers = vc4_register_allocate(vc4, c);
         struct qblock *start_block = list_first_entry(&c->blocks,
                                                       struct qblock, link);
+
+        struct qpu_reg *temp_registers = vc4_register_allocate(vc4, c);
+        if (!temp_registers)
+                return;
 
         switch (c->stage) {
         case QSTAGE_VERT:

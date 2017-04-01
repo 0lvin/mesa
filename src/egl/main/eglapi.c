@@ -734,7 +734,9 @@ eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_list,
 
    _EGL_CHECK_DISPLAY(disp, EGL_NO_CONTEXT, drv);
 
-   if (!config && !disp->Extensions.KHR_no_config_context)
+   if (config != EGL_NO_CONFIG_KHR)
+      _EGL_CHECK_CONFIG(disp, conf, EGL_NO_CONTEXT, drv);
+   else if (!disp->Extensions.KHR_no_config_context)
       RETURN_EGL_ERROR(disp, EGL_BAD_CONFIG, EGL_NO_CONTEXT);
 
    if (!share && share_list != EGL_NO_CONTEXT)
@@ -847,7 +849,7 @@ _eglCreateWindowSurfaceCommon(_EGLDisplay *disp, EGLConfig config,
       RETURN_EGL_ERROR(disp, EGL_BAD_NATIVE_WINDOW, EGL_NO_SURFACE);
 
 #ifdef HAVE_SURFACELESS_PLATFORM
-   if (disp->Platform == _EGL_PLATFORM_SURFACELESS) {
+   if (disp && disp->Platform == _EGL_PLATFORM_SURFACELESS) {
       /* From the EGL_MESA_platform_surfaceless spec (v1):
        *
        *    eglCreatePlatformWindowSurface fails when called with a <display>
@@ -865,6 +867,9 @@ _eglCreateWindowSurfaceCommon(_EGLDisplay *disp, EGLConfig config,
 #endif
 
    _EGL_CHECK_CONFIG(disp, conf, EGL_NO_SURFACE, drv);
+
+   if ((conf->SurfaceType & EGL_WINDOW_BIT) == 0)
+      RETURN_EGL_ERROR(disp, EGL_BAD_MATCH, EGL_NO_SURFACE);
 
    surf = drv->API.CreateWindowSurface(drv, disp, conf, native_window,
                                        attrib_list);
@@ -968,7 +973,7 @@ _eglCreatePixmapSurfaceCommon(_EGLDisplay *disp, EGLConfig config,
    EGLSurface ret;
 
 #if HAVE_SURFACELESS_PLATFORM
-   if (disp->Platform == _EGL_PLATFORM_SURFACELESS) {
+   if (disp && disp->Platform == _EGL_PLATFORM_SURFACELESS) {
       /* From the EGL_MESA_platform_surfaceless spec (v1):
        *
        *   [Like eglCreatePlatformWindowSurface,] eglCreatePlatformPixmapSurface
@@ -984,6 +989,10 @@ _eglCreatePixmapSurfaceCommon(_EGLDisplay *disp, EGLConfig config,
 #endif
 
    _EGL_CHECK_CONFIG(disp, conf, EGL_NO_SURFACE, drv);
+
+   if ((conf->SurfaceType & EGL_PIXMAP_BIT) == 0)
+      RETURN_EGL_ERROR(disp, EGL_BAD_MATCH, EGL_NO_SURFACE);
+
    surf = drv->API.CreatePixmapSurface(drv, disp, conf, native_pixmap,
                                        attrib_list);
    ret = (surf) ? _eglLinkSurface(surf) : EGL_NO_SURFACE;
@@ -1053,6 +1062,9 @@ eglCreatePbufferSurface(EGLDisplay dpy, EGLConfig config,
 
    _EGL_FUNC_START(disp, EGL_OBJECT_DISPLAY_KHR, NULL, EGL_NO_SURFACE);
    _EGL_CHECK_CONFIG(disp, conf, EGL_NO_SURFACE, drv);
+
+   if ((conf->SurfaceType & EGL_PBUFFER_BIT) == 0)
+      RETURN_EGL_ERROR(disp, EGL_BAD_MATCH, EGL_NO_SURFACE);
 
    surf = drv->API.CreatePbufferSurface(drv, disp, conf, attrib_list);
    ret = (surf) ? _eglLinkSurface(surf) : EGL_NO_SURFACE;
@@ -2382,7 +2394,7 @@ _eglLockDisplayInterop(EGLDisplay dpy, EGLContext context,
    return MESA_GLINTEROP_SUCCESS;
 }
 
-int
+PUBLIC int
 MesaGLInteropEGLQueryDeviceInfo(EGLDisplay dpy, EGLContext context,
                                 struct mesa_glinterop_device_info *out)
 {
@@ -2404,7 +2416,7 @@ MesaGLInteropEGLQueryDeviceInfo(EGLDisplay dpy, EGLContext context,
    return ret;
 }
 
-int
+PUBLIC int
 MesaGLInteropEGLExportObject(EGLDisplay dpy, EGLContext context,
                              struct mesa_glinterop_export_in *in,
                              struct mesa_glinterop_export_out *out)

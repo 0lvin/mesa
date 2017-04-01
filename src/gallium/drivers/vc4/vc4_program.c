@@ -102,9 +102,9 @@ indirect_uniform_load(struct vc4_compile *c, nir_intrinsic_instr *intr)
 
         /* Clamp to [0, array size).  Note that MIN/MAX are signed. */
         indirect_offset = qir_MAX(c, indirect_offset, qir_uniform_ui(c, 0));
-        indirect_offset = qir_MIN(c, indirect_offset,
-                                  qir_uniform_ui(c, (range->dst_offset +
-                                                     range->size - 4)));
+        indirect_offset = qir_MIN_NOIMM(c, indirect_offset,
+                                        qir_uniform_ui(c, (range->dst_offset +
+                                                           range->size - 4)));
 
         qir_TEX_DIRECT(c, indirect_offset, qir_uniform(c, QUNIFORM_UBO_ADDR, 0));
         c->num_texture_samples++;
@@ -322,7 +322,7 @@ ntq_emit_txf(struct vc4_compile *c, nir_tex_instr *instr)
 
         /* Perform the clamping required by kernel validation. */
         addr = qir_MAX(c, addr, qir_uniform_ui(c, 0));
-        addr = qir_MIN(c, addr,  qir_uniform_ui(c, size - 4));
+        addr = qir_MIN_NOIMM(c, addr, qir_uniform_ui(c, size - 4));
 
         qir_TEX_DIRECT(c, addr, qir_uniform(c, QUNIFORM_TEXTURE_MSAA_ADDR, unit));
 
@@ -451,6 +451,15 @@ ntq_emit_tex(struct vc4_compile *c, nir_tex_instr *instr)
                 struct qreg u0 = qir_uniform_f(c, 0.0f);
                 struct qreg u1 = qir_uniform_f(c, 1.0f);
                 if (c->key->tex[unit].compare_mode) {
+                        /* From the GL_ARB_shadow spec:
+                         *
+                         *     "Let Dt (D subscript t) be the depth texture
+                         *      value, in the range [0, 1].  Let R be the
+                         *      interpolated texture coordinate clamped to the
+                         *      range [0, 1]."
+                         */
+                        compare = qir_SAT(c, compare);
+
                         switch (c->key->tex[unit].compare_func) {
                         case PIPE_FUNC_NEVER:
                                 depth_output = qir_uniform_f(c, 0.0f);
@@ -1370,7 +1379,7 @@ emit_vert_end(struct vc4_compile *c,
               struct vc4_varying_slot *fs_inputs,
               uint32_t num_fs_inputs)
 {
-        struct qreg rcp_w = qir_RCP(c, c->outputs[c->output_position_index + 3]);
+        struct qreg rcp_w = ntq_rcp(c, c->outputs[c->output_position_index + 3]);
 
         emit_stub_vpm_read(c);
 
@@ -1856,22 +1865,29 @@ ntq_emit_if(struct vc4_compile *c, nir_if *if_stmt)
 static void
 ntq_emit_jump(struct vc4_compile *c, nir_jump_instr *jump)
 {
+        struct qblock *jump_block;
         switch (jump->type) {
         case nir_jump_break:
-                qir_SF(c, c->execute);
-                qir_MOV_cond(c, QPU_COND_ZS, c->execute,
-                             qir_uniform_ui(c, c->loop_break_block->index));
+                jump_block = c->loop_break_block;
                 break;
-
         case nir_jump_continue:
-                qir_SF(c, c->execute);
-                qir_MOV_cond(c, QPU_COND_ZS, c->execute,
-                             qir_uniform_ui(c, c->loop_cont_block->index));
+                jump_block = c->loop_cont_block;
                 break;
-
-        case nir_jump_return:
-                unreachable("All returns shouold be lowered\n");
+        default:
+                unreachable("Unsupported jump type\n");
         }
+
+        qir_SF(c, c->execute);
+        qir_MOV_cond(c, QPU_COND_ZS, c->execute,
+                     qir_uniform_ui(c, jump_block->index));
+
+        /* Jump to the destination block if everyone has taken the jump. */
+        qir_SF(c, qir_SUB(c, c->execute, qir_uniform_ui(c, jump_block->index)));
+        qir_BRANCH(c, QPU_COND_BRANCH_ALL_ZS);
+        struct qblock *new_block = qir_new_block(c);
+        qir_link_blocks(c->cur_block, jump_block);
+        qir_link_blocks(c->cur_block, new_block);
+        qir_set_emit_block(c, new_block);
 }
 
 static void
@@ -2437,9 +2453,15 @@ vc4_get_compiled_shader(struct vc4_context *vc4, enum qstage stage,
                 }
         }
 
-        copy_uniform_state_to_shader(shader, c);
-        shader->bo = vc4_bo_alloc_shader(vc4->screen, c->qpu_insts,
-                                         c->qpu_inst_count * sizeof(uint64_t));
+        shader->failed = c->failed;
+        if (c->failed) {
+                shader->failed = true;
+        } else {
+                copy_uniform_state_to_shader(shader, c);
+                shader->bo = vc4_bo_alloc_shader(vc4->screen, c->qpu_insts,
+                                                 c->qpu_inst_count *
+                                                 sizeof(uint64_t));
+        }
 
         /* Copy the compiler UBO range state to the compiled shader, dropping
          * out arrays that were never referenced by an indirect load.
@@ -2642,11 +2664,15 @@ vc4_update_compiled_vs(struct vc4_context *vc4, uint8_t prim_mode)
         }
 }
 
-void
+bool
 vc4_update_compiled_shaders(struct vc4_context *vc4, uint8_t prim_mode)
 {
         vc4_update_compiled_fs(vc4, prim_mode);
         vc4_update_compiled_vs(vc4, prim_mode);
+
+        return !(vc4->prog.cs->failed ||
+                 vc4->prog.vs->failed ||
+                 vc4->prog.fs->failed);
 }
 
 static uint32_t

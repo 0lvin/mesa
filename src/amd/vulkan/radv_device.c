@@ -44,12 +44,6 @@
 #include "util/debug.h"
 struct radv_dispatch_table dtable;
 
-struct radv_fence {
-	struct radeon_winsys_fence *fence;
-	bool submitted;
-	bool signalled;
-};
-
 static VkResult
 radv_physical_device_init(struct radv_physical_device *device,
 			  struct radv_instance *instance,
@@ -97,6 +91,7 @@ radv_physical_device_init(struct radv_physical_device *device,
 
 	fprintf(stderr, "WARNING: radv is not a conformant vulkan implementation, testing use only.\n");
 	device->name = device->rad_info.name;
+	close(fd);
 	return VK_SUCCESS;
 
 fail:
@@ -119,13 +114,19 @@ static const VkExtensionProperties global_extensions[] = {
 #ifdef VK_USE_PLATFORM_XCB_KHR
 	{
 		.extensionName = VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-		.specVersion = 5,
+		.specVersion = 6,
+	},
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+	{
+		.extensionName = VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+		.specVersion = 6,
 	},
 #endif
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
 	{
 		.extensionName = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-		.specVersion = 4,
+		.specVersion = 5,
 	},
 #endif
 };
@@ -133,7 +134,7 @@ static const VkExtensionProperties global_extensions[] = {
 static const VkExtensionProperties device_extensions[] = {
 	{
 		.extensionName = VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-		.specVersion = 67,
+		.specVersion = 68,
 	},
 };
 
@@ -424,7 +425,7 @@ void radv_GetPhysicalDeviceProperties(
 		.maxGeometryTotalOutputComponents         = 1024,
 		.maxFragmentInputComponents               = 128,
 		.maxFragmentOutputAttachments             = 8,
-		.maxFragmentDualSrcAttachments            = 2,
+		.maxFragmentDualSrcAttachments            = 1,
 		.maxFragmentCombinedOutputResources       = 8,
 		.maxComputeSharedMemorySize               = 32768,
 		.maxComputeWorkGroupCount                 = { 65535, 65535, 65535 },
@@ -659,17 +660,15 @@ VkResult radv_EnumerateInstanceExtensionProperties(
 	uint32_t*                                   pPropertyCount,
 	VkExtensionProperties*                      pProperties)
 {
-	unsigned i;
 	if (pProperties == NULL) {
 		*pPropertyCount = ARRAY_SIZE(global_extensions);
 		return VK_SUCCESS;
 	}
 
-	for (i = 0; i < *pPropertyCount; i++)
-		memcpy(&pProperties[i], &global_extensions[i], sizeof(VkExtensionProperties));
+	*pPropertyCount = MIN2(*pPropertyCount, ARRAY_SIZE(global_extensions));
+	typed_memcpy(pProperties, global_extensions, *pPropertyCount);
 
-	*pPropertyCount = i;
-	if (i < ARRAY_SIZE(global_extensions))
+	if (*pPropertyCount < ARRAY_SIZE(global_extensions))
 		return VK_INCOMPLETE;
 
 	return VK_SUCCESS;
@@ -681,19 +680,17 @@ VkResult radv_EnumerateDeviceExtensionProperties(
 	uint32_t*                                   pPropertyCount,
 	VkExtensionProperties*                      pProperties)
 {
-	unsigned i;
-
 	if (pProperties == NULL) {
 		*pPropertyCount = ARRAY_SIZE(device_extensions);
 		return VK_SUCCESS;
 	}
 
-	for (i = 0; i < *pPropertyCount; i++)
-		memcpy(&pProperties[i], &device_extensions[i], sizeof(VkExtensionProperties));
+	*pPropertyCount = MIN2(*pPropertyCount, ARRAY_SIZE(device_extensions));
+	typed_memcpy(pProperties, device_extensions, *pPropertyCount);
 
-	*pPropertyCount = i;
-	if (i < ARRAY_SIZE(device_extensions))
+	if (*pPropertyCount < ARRAY_SIZE(device_extensions))
 		return VK_INCOMPLETE;
+
 	return VK_SUCCESS;
 }
 
@@ -869,7 +866,7 @@ VkResult radv_AllocateMemory(
 		flags |= RADEON_FLAG_NO_CPU_ACCESS;
 	else
 		flags |= RADEON_FLAG_CPU_ACCESS;
-	mem->bo = device->ws->buffer_create(device->ws, alloc_size, 32768,
+	mem->bo = device->ws->buffer_create(device->ws, alloc_size, 65536,
 					       domain, flags);
 
 	if (!mem->bo) {
@@ -1172,6 +1169,8 @@ VkResult radv_GetFenceStatus(VkDevice _device, VkFence _fence)
 	RADV_FROM_HANDLE(radv_device, device, _device);
 	RADV_FROM_HANDLE(radv_fence, fence, _fence);
 
+	if (fence->signalled)
+		return VK_SUCCESS;
 	if (!fence->submitted)
 		return VK_NOT_READY;
 
@@ -1734,15 +1733,36 @@ radv_tex_bordercolor(VkBorderColor bcolor)
 	return 0;
 }
 
+static unsigned
+radv_tex_aniso_filter(unsigned filter)
+{
+	if (filter < 2)
+		return 0;
+	if (filter < 4)
+		return 1;
+	if (filter < 8)
+		return 2;
+	if (filter < 16)
+		return 3;
+	return 4;
+}
+
 static void
 radv_init_sampler(struct radv_device *device,
 		  struct radv_sampler *sampler,
 		  const VkSamplerCreateInfo *pCreateInfo)
 {
-	uint32_t max_aniso = 0;
-	uint32_t max_aniso_ratio = 0;//TODO
+	uint32_t max_aniso = pCreateInfo->anisotropyEnable && pCreateInfo->maxAnisotropy > 1.0 ?
+					(uint32_t) pCreateInfo->maxAnisotropy : 0;
+	uint32_t max_aniso_ratio = radv_tex_aniso_filter(max_aniso);
 	bool is_vi;
 	is_vi = (device->instance->physicalDevice.rad_info.chip_class >= VI);
+
+	if (!is_vi && max_aniso > 0) {
+		radv_finishme("Anisotropic filtering must be disabled manually "
+		              "by the shader on SI-CI when BASE_LEVEL == LAST_LEVEL\n");
+		max_aniso = max_aniso_ratio = 0;
+	}
 
 	sampler->state[0] = (S_008F30_CLAMP_X(radv_tex_wrap(pCreateInfo->addressModeU)) |
 			     S_008F30_CLAMP_Y(radv_tex_wrap(pCreateInfo->addressModeV)) |
@@ -1750,15 +1770,18 @@ radv_init_sampler(struct radv_device *device,
 			     S_008F30_MAX_ANISO_RATIO(max_aniso_ratio) |
 			     S_008F30_DEPTH_COMPARE_FUNC(radv_tex_compare(pCreateInfo->compareOp)) |
 			     S_008F30_FORCE_UNNORMALIZED(pCreateInfo->unnormalizedCoordinates ? 1 : 0) |
+			     S_008F30_ANISO_THRESHOLD(max_aniso_ratio >> 1) |
+			     S_008F30_ANISO_BIAS(max_aniso_ratio) |
 			     S_008F30_DISABLE_CUBE_WRAP(0) |
 			     S_008F30_COMPAT_MODE(is_vi));
 	sampler->state[1] = (S_008F34_MIN_LOD(S_FIXED(CLAMP(pCreateInfo->minLod, 0, 15), 8)) |
-			     S_008F34_MAX_LOD(S_FIXED(CLAMP(pCreateInfo->maxLod, 0, 15), 8)));
+			     S_008F34_MAX_LOD(S_FIXED(CLAMP(pCreateInfo->maxLod, 0, 15), 8)) |
+			     S_008F34_PERF_MIP(max_aniso_ratio ? max_aniso_ratio + 6 : 0));
 	sampler->state[2] = (S_008F38_LOD_BIAS(S_FIXED(CLAMP(pCreateInfo->mipLodBias, -16, 16), 8)) |
 			     S_008F38_XY_MAG_FILTER(radv_tex_filter(pCreateInfo->magFilter, max_aniso)) |
 			     S_008F38_XY_MIN_FILTER(radv_tex_filter(pCreateInfo->minFilter, max_aniso)) |
 			     S_008F38_MIP_FILTER(radv_tex_mipfilter(pCreateInfo->mipmapMode)) |
-			     S_008F38_MIP_POINT_PRECLAMP(1) |
+			     S_008F38_MIP_POINT_PRECLAMP(0) |
 			     S_008F38_DISABLE_LSB_CEIL(1) |
 			     S_008F38_FILTER_PREC_FIX(1) |
 			     S_008F38_ANISO_OVERRIDE(is_vi));
@@ -1799,4 +1822,49 @@ void radv_DestroySampler(
 	if (!sampler)
 		return;
 	vk_free2(&device->alloc, pAllocator, sampler);
+}
+
+
+/* vk_icd.h does not declare this function, so we declare it here to
+ * suppress Wmissing-prototypes.
+ */
+PUBLIC VKAPI_ATTR VkResult VKAPI_CALL
+vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t *pSupportedVersion);
+
+PUBLIC VKAPI_ATTR VkResult VKAPI_CALL
+vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t *pSupportedVersion)
+{
+	/* For the full details on loader interface versioning, see
+	* <https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/blob/master/loader/LoaderAndLayerInterface.md>.
+	* What follows is a condensed summary, to help you navigate the large and
+	* confusing official doc.
+	*
+	*   - Loader interface v0 is incompatible with later versions. We don't
+	*     support it.
+	*
+	*   - In loader interface v1:
+	*       - The first ICD entrypoint called by the loader is
+	*         vk_icdGetInstanceProcAddr(). The ICD must statically expose this
+	*         entrypoint.
+	*       - The ICD must statically expose no other Vulkan symbol unless it is
+	*         linked with -Bsymbolic.
+	*       - Each dispatchable Vulkan handle created by the ICD must be
+	*         a pointer to a struct whose first member is VK_LOADER_DATA. The
+	*         ICD must initialize VK_LOADER_DATA.loadMagic to ICD_LOADER_MAGIC.
+	*       - The loader implements vkCreate{PLATFORM}SurfaceKHR() and
+	*         vkDestroySurfaceKHR(). The ICD must be capable of working with
+	*         such loader-managed surfaces.
+	*
+	*    - Loader interface v2 differs from v1 in:
+	*       - The first ICD entrypoint called by the loader is
+	*         vk_icdNegotiateLoaderICDInterfaceVersion(). The ICD must
+	*         statically expose this entrypoint.
+	*
+	*    - Loader interface v3 differs from v2 in:
+	*        - The ICD must implement vkCreate{PLATFORM}SurfaceKHR(),
+	*          vkDestroySurfaceKHR(), and other API which uses VKSurfaceKHR,
+	*          because the loader no longer does so.
+	*/
+	*pSupportedVersion = MIN2(*pSupportedVersion, 3u);
+	return VK_SUCCESS;
 }

@@ -805,8 +805,12 @@ vtn_get_builtin_location(struct vtn_builder *b,
       set_mode_system_value(mode);
       break;
    case SpvBuiltInPrimitiveId:
-      *location = VARYING_SLOT_PRIMITIVE_ID;
-      *mode = nir_var_shader_out;
+      if (*mode == nir_var_shader_out) {
+         *location = VARYING_SLOT_PRIMITIVE_ID;
+      } else {
+         *location = SYSTEM_VALUE_PRIMITIVE_ID;
+         set_mode_system_value(mode);
+      }
       break;
    case SpvBuiltInInvocationId:
       *location = SYSTEM_VALUE_INVOCATION_ID;
@@ -1054,7 +1058,8 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
          is_vertex_input = false;
          location += VARYING_SLOT_VAR0;
       } else {
-         unreachable("Location must be on input or output variable");
+         vtn_warn("Location must be on input or output variable");
+         return;
       }
 
       if (vtn_var->var) {
@@ -1154,6 +1159,12 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
                      const uint32_t *w, unsigned count)
 {
    switch (opcode) {
+   case SpvOpUndef: {
+      struct vtn_value *val = vtn_push_value(b, w[2], vtn_value_type_undef);
+      val->type = vtn_value(b, w[1], vtn_value_type_type)->type;
+      break;
+   }
+
    case SpvOpVariable: {
       struct vtn_variable *var = rzalloc(b, struct vtn_variable);
       var->type = vtn_value(b, w[1], vtn_value_type_type)->type;

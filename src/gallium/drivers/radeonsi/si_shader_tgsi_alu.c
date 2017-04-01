@@ -459,6 +459,8 @@ static void emit_bfi(const struct lp_build_tgsi_action *action,
 	struct gallivm_state *gallivm = bld_base->base.gallivm;
 	LLVMBuilderRef builder = gallivm->builder;
 	LLVMValueRef bfi_args[3];
+	LLVMValueRef bfi_sm5;
+	LLVMValueRef cond;
 
 	// Calculate the bitmask: (((1 << src3) - 1) << src2
 	bfi_args[0] = LLVMBuildShl(builder,
@@ -478,11 +480,40 @@ static void emit_bfi(const struct lp_build_tgsi_action *action,
 	 *   (arg0 & arg1) | (~arg0 & arg2) = arg2 ^ (arg0 & (arg1 ^ arg2)
 	 * Use the right-hand side, which the LLVM backend can convert to V_BFI.
 	 */
-	emit_data->output[emit_data->chan] =
+	bfi_sm5 =
 		LLVMBuildXor(builder, bfi_args[2],
 			LLVMBuildAnd(builder, bfi_args[0],
 				LLVMBuildXor(builder, bfi_args[1], bfi_args[2],
 					     ""), ""), "");
+
+	/* Since shifts of >= 32 bits are undefined in LLVM IR, the backend
+	 * uses the convenient V_BFI lowering for the above, which follows SM5
+	 * and disagrees with GLSL semantics when bits (src3) is 32.
+	 */
+	cond = LLVMBuildICmp(builder, LLVMIntUGE, emit_data->args[3],
+			     lp_build_const_int32(gallivm, 32), "");
+	emit_data->output[emit_data->chan] =
+		LLVMBuildSelect(builder, cond, emit_data->args[1], bfi_sm5, "");
+}
+
+static void emit_bfe(const struct lp_build_tgsi_action *action,
+		     struct lp_build_tgsi_context *bld_base,
+		     struct lp_build_emit_data *emit_data)
+{
+	struct gallivm_state *gallivm = bld_base->base.gallivm;
+	LLVMBuilderRef builder = gallivm->builder;
+	LLVMValueRef bfe_sm5;
+	LLVMValueRef cond;
+
+	bfe_sm5 = lp_build_intrinsic(builder, action->intr_name,
+				     emit_data->dst_type, emit_data->args,
+				     emit_data->arg_count, LLVMReadNoneAttribute);
+
+	/* Correct for GLSL semantics. */
+	cond = LLVMBuildICmp(builder, LLVMIntUGE, emit_data->args[2],
+			     lp_build_const_int32(gallivm, 32), "");
+	emit_data->output[emit_data->chan] =
+		LLVMBuildSelect(builder, cond, emit_data->args[0], bfe_sm5, "");
 }
 
 /* this is ffs in C */
@@ -491,23 +522,32 @@ static void emit_lsb(const struct lp_build_tgsi_action *action,
 		     struct lp_build_emit_data *emit_data)
 {
 	struct gallivm_state *gallivm = bld_base->base.gallivm;
+	LLVMBuilderRef builder = gallivm->builder;
 	LLVMValueRef args[2] = {
 		emit_data->args[0],
 
 		/* The value of 1 means that ffs(x=0) = undef, so LLVM won't
 		 * add special code to check for x=0. The reason is that
 		 * the LLVM behavior for x=0 is different from what we
-		 * need here.
-		 *
-		 * The hardware already implements the correct behavior.
+		 * need here. However, LLVM also assumes that ffs(x) is
+		 * in [0, 31], but GLSL expects that ffs(0) = -1, so
+		 * a conditional assignment to handle 0 is still required.
 		 */
 		LLVMConstInt(LLVMInt1TypeInContext(gallivm->context), 1, 0)
 	};
 
-	emit_data->output[emit_data->chan] =
+	LLVMValueRef lsb =
 		lp_build_intrinsic(gallivm->builder, "llvm.cttz.i32",
 				emit_data->dst_type, args, ARRAY_SIZE(args),
 				LLVMReadNoneAttribute);
+
+	/* TODO: We need an intrinsic to skip this conditional. */
+	/* Check for zero: */
+	emit_data->output[emit_data->chan] =
+		LLVMBuildSelect(builder,
+				LLVMBuildICmp(builder, LLVMIntEQ, args[0],
+					      bld_base->uint_bld.zero, ""),
+				lp_build_const_int32(gallivm, -1), lsb, "");
 }
 
 /* Find the last bit set. */
@@ -774,7 +814,7 @@ void si_shader_context_init_alu(struct lp_build_tgsi_context *bld_base)
 	bld_base->op_actions[TGSI_OPCODE_FSLT].emit = emit_fcmp;
 	bld_base->op_actions[TGSI_OPCODE_FSNE].emit = emit_fcmp;
 	bld_base->op_actions[TGSI_OPCODE_IABS].emit = emit_iabs;
-	bld_base->op_actions[TGSI_OPCODE_IBFE].emit = build_tgsi_intrinsic_nomem;
+	bld_base->op_actions[TGSI_OPCODE_IBFE].emit = emit_bfe;
 	bld_base->op_actions[TGSI_OPCODE_IBFE].intr_name = "llvm.AMDGPU.bfe.i32";
 	bld_base->op_actions[TGSI_OPCODE_IDIV].emit = emit_idiv;
 	bld_base->op_actions[TGSI_OPCODE_IMAX].emit = emit_minmax_int;
@@ -826,7 +866,7 @@ void si_shader_context_init_alu(struct lp_build_tgsi_context *bld_base)
 	bld_base->op_actions[TGSI_OPCODE_TRUNC].emit = build_tgsi_intrinsic_nomem;
 	bld_base->op_actions[TGSI_OPCODE_TRUNC].intr_name = "llvm.trunc.f32";
 	bld_base->op_actions[TGSI_OPCODE_UADD].emit = emit_uadd;
-	bld_base->op_actions[TGSI_OPCODE_UBFE].emit = build_tgsi_intrinsic_nomem;
+	bld_base->op_actions[TGSI_OPCODE_UBFE].emit = emit_bfe;
 	bld_base->op_actions[TGSI_OPCODE_UBFE].intr_name = "llvm.AMDGPU.bfe.u32";
 	bld_base->op_actions[TGSI_OPCODE_UDIV].emit = emit_udiv;
 	bld_base->op_actions[TGSI_OPCODE_UMAX].emit = emit_minmax_int;

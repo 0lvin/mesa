@@ -111,6 +111,7 @@ enum qop {
         QOP_SHR,
         QOP_ASR,
         QOP_MIN,
+        QOP_MIN_NOIMM,
         QOP_MAX,
         QOP_AND,
         QOP_OR,
@@ -523,6 +524,7 @@ struct vc4_compile {
 
         uint32_t program_id;
         uint32_t variant_id;
+        bool failed;
 };
 
 /* Special nir_load_input intrinsic index for loading the current TLB
@@ -708,6 +710,7 @@ QIR_ALU2(SHL)
 QIR_ALU2(SHR)
 QIR_ALU2(ASR)
 QIR_ALU2(MIN)
+QIR_ALU2(MIN_NOIMM)
 QIR_ALU2(MAX)
 QIR_ALU2(AND)
 QIR_ALU2(OR)

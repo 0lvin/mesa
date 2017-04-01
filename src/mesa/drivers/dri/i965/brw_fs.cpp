@@ -492,19 +492,6 @@ type_size_scalar(const struct glsl_type *type)
    return 0;
 }
 
-/**
- * Returns the number of scalar components needed to store type, assuming
- * that vectors are padded out to vec4.
- *
- * This has the packing rules of type_size_vec4(), but counts components
- * similar to type_size_scalar().
- */
-extern "C" int
-type_size_vec4_times_4(const struct glsl_type *type)
-{
-   return 4 * type_size_vec4(type);
-}
-
 /* Attribute arrays are loaded as one vec4 per element (or matrix column),
  * except for double-precision types, which are loaded as one dvec4.
  */
@@ -1687,6 +1674,12 @@ fs_visitor::assign_gs_urb_setup()
 void
 fs_visitor::split_virtual_grfs()
 {
+   /* Compact the register file so we eliminate dead vgrfs.  This
+    * only defines split points for live registers, so if we have
+    * too large dead registers they will hit assertions later.
+    */
+   compact_virtual_grfs();
+
    int num_vars = this->alloc.count;
 
    /* Count the total number of registers */
@@ -1871,7 +1864,10 @@ fs_visitor::compact_virtual_grfs()
 }
 
 static void
-set_push_pull_constant_loc(unsigned uniform, int *chunk_start, bool contiguous,
+set_push_pull_constant_loc(unsigned uniform, int *chunk_start,
+                           unsigned *max_chunk_bitsize,
+                           bool contiguous, unsigned bitsize,
+                           const unsigned target_bitsize,
                            int *push_constant_loc, int *pull_constant_loc,
                            unsigned *num_push_constants,
                            unsigned *num_pull_constants,
@@ -1883,11 +1879,23 @@ set_push_pull_constant_loc(unsigned uniform, int *chunk_start, bool contiguous,
    if (*chunk_start < 0)
       *chunk_start = uniform;
 
+   /* Keep track of the maximum bit size access in contiguous uniforms */
+   *max_chunk_bitsize = MAX2(*max_chunk_bitsize, bitsize);
+
    /* If this element does not need to be contiguous with the next, we
     * split at this point and everything between chunk_start and u forms a
     * single chunk.
     */
    if (!contiguous) {
+      /* If bitsize doesn't match the target one, skip it */
+      if (*max_chunk_bitsize != target_bitsize) {
+         /* FIXME: right now we only support 32 and 64-bit accesses */
+         assert(*max_chunk_bitsize == 4 || *max_chunk_bitsize == 8);
+         *max_chunk_bitsize = 0;
+         *chunk_start = -1;
+         return;
+      }
+
       unsigned chunk_size = uniform - *chunk_start + 1;
 
       /* Decide whether we should push or pull this parameter.  In the
@@ -1905,6 +1913,7 @@ set_push_pull_constant_loc(unsigned uniform, int *chunk_start, bool contiguous,
             pull_constant_loc[j] = (*num_pull_constants)++;
       }
 
+      *max_chunk_bitsize = 0;
       *chunk_start = -1;
    }
 }
@@ -1927,8 +1936,8 @@ fs_visitor::assign_constant_locations()
 
    bool is_live[uniforms];
    memset(is_live, 0, sizeof(is_live));
-   bool is_live_64bit[uniforms];
-   memset(is_live_64bit, 0, sizeof(is_live_64bit));
+   unsigned bitsize_access[uniforms];
+   memset(bitsize_access, 0, sizeof(bitsize_access));
 
    /* For each uniform slot, a value of true indicates that the given slot and
     * the next slot must remain contiguous.  This is used to keep us from
@@ -1965,20 +1974,18 @@ fs_visitor::assign_constant_locations()
             for (unsigned j = constant_nr; j < last; j++) {
                is_live[j] = true;
                contiguous[j] = true;
-               if (type_sz(inst->src[i].type) == 8) {
-                  is_live_64bit[j] = true;
-               }
+               bitsize_access[j] = MAX2(bitsize_access[j], type_sz(inst->src[i].type));
             }
             is_live[last] = true;
+            bitsize_access[last] = MAX2(bitsize_access[last], type_sz(inst->src[i].type));
          } else {
             if (constant_nr >= 0 && constant_nr < (int) uniforms) {
                int regs_read = inst->components_read(i) *
                   type_sz(inst->src[i].type) / 4;
                for (int j = 0; j < regs_read; j++) {
                   is_live[constant_nr + j] = true;
-                  if (type_sz(inst->src[i].type) == 8) {
-                     is_live_64bit[constant_nr + j] = true;
-                  }
+                  bitsize_access[constant_nr + j] =
+                     MAX2(bitsize_access[constant_nr + j], type_sz(inst->src[i].type));
                }
             }
          }
@@ -2017,13 +2024,17 @@ fs_visitor::assign_constant_locations()
    memset(pull_constant_loc, -1, uniforms * sizeof(*pull_constant_loc));
 
    int chunk_start = -1;
+   unsigned max_chunk_bitsize = 0;
 
    /* First push 64-bit uniforms to ensure they are properly aligned */
+   const unsigned uniform_64_bit_size = type_sz(BRW_REGISTER_TYPE_DF);
    for (unsigned u = 0; u < uniforms; u++) {
-      if (!is_live[u] || !is_live_64bit[u])
+      if (!is_live[u])
          continue;
 
-      set_push_pull_constant_loc(u, &chunk_start, contiguous[u],
+      set_push_pull_constant_loc(u, &chunk_start, &max_chunk_bitsize,
+                                 contiguous[u], bitsize_access[u],
+                                 uniform_64_bit_size,
                                  push_constant_loc, pull_constant_loc,
                                  &num_push_constants, &num_pull_constants,
                                  max_push_components, max_chunk_size,
@@ -2032,15 +2043,18 @@ fs_visitor::assign_constant_locations()
    }
 
    /* Then push the rest of uniforms */
+   const unsigned uniform_32_bit_size = type_sz(BRW_REGISTER_TYPE_F);
    for (unsigned u = 0; u < uniforms; u++) {
-      if (!is_live[u] || is_live_64bit[u])
+      if (!is_live[u])
          continue;
 
       /* Skip thread_local_id_index to put it in the last push register. */
       if (thread_local_id_index == (int)u)
          continue;
 
-      set_push_pull_constant_loc(u, &chunk_start, contiguous[u],
+      set_push_pull_constant_loc(u, &chunk_start, &max_chunk_bitsize,
+                                 contiguous[u], bitsize_access[u],
+                                 uniform_32_bit_size,
                                  push_constant_loc, pull_constant_loc,
                                  &num_push_constants, &num_pull_constants,
                                  max_push_components, max_chunk_size,
@@ -3679,6 +3693,12 @@ lower_fb_write_logical_send(const fs_builder &bld, fs_inst *inst,
        * of the message and src0_alpha has per-channel semantics.
        */
       setup_color_payload(bld, key, &sources[length], src0_alpha, 1);
+      length++;
+   } else if (key->replicate_alpha && inst->target != 0) {
+      /* Handle the case when fragment shader doesn't write to draw buffer
+       * zero. No need to call setup_color_payload() for src0_alpha because
+       * alpha value will be undefined.
+       */
       length++;
    }
 
@@ -5693,7 +5713,7 @@ fs_visitor::optimize()
 
       OPT(opt_algebraic);
       OPT(opt_cse);
-      OPT(opt_copy_propagate);
+      OPT(opt_copy_propagation);
       OPT(opt_predicated_break, this);
       OPT(opt_cmod_propagation);
       OPT(dead_code_eliminate);
@@ -5717,7 +5737,7 @@ fs_visitor::optimize()
    }
 
    if (OPT(lower_d2x)) {
-      OPT(opt_copy_propagate);
+      OPT(opt_copy_propagation);
       OPT(dead_code_eliminate);
    }
 
@@ -5729,12 +5749,12 @@ fs_visitor::optimize()
    OPT(lower_logical_sends);
 
    if (progress) {
-      OPT(opt_copy_propagate);
+      OPT(opt_copy_propagation);
       /* Only run after logical send lowering because it's easier to implement
        * in terms of physical sends.
        */
       if (OPT(opt_zero_samples))
-         OPT(opt_copy_propagate);
+         OPT(opt_copy_propagation);
       /* Run after logical send lowering to give it a chance to CSE the
        * LOAD_PAYLOAD instructions created to construct the payloads of
        * e.g. texturing messages in cases where it wasn't possible to CSE the
@@ -5763,7 +5783,7 @@ fs_visitor::optimize()
    if (devinfo->gen <= 5 && OPT(lower_minmax)) {
       OPT(opt_cmod_propagation);
       OPT(opt_cse);
-      OPT(opt_copy_propagate);
+      OPT(opt_copy_propagation);
       OPT(dead_code_eliminate);
    }
 

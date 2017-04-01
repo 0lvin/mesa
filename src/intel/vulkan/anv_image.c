@@ -79,8 +79,11 @@ choose_isl_surf_usage(VkImageUsageFlags vk_usage,
       isl_usage |= ISL_SURF_USAGE_TEXTURE_BIT;
    }
 
-   if (vk_usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
-      /* blorp implements transfers by rendering into the destination image. */
+   if (vk_usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT &&
+       aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+      /* blorp implements transfers by rendering into the destination image.
+       * Only request this with color images, as we deal with depth/stencil
+       * formats differently. */
       isl_usage |= ISL_SURF_USAGE_RENDER_TARGET_BIT;
    }
 
@@ -190,12 +193,14 @@ make_surface(const struct anv_device *dev,
          anv_finishme("Implement gen7 HiZ");
       } else if (vk_info->mipLevels > 1) {
          anv_finishme("Test multi-LOD HiZ");
+      } else if (vk_info->arrayLayers > 1) {
+         anv_finishme("Implement multi-arrayLayer HiZ clears and resolves");
       } else if (dev->info.gen == 8 && vk_info->samples > 1) {
          anv_finishme("Test gen8 multisampled HiZ");
       } else {
          isl_surf_get_hiz_surf(&dev->isl_dev, &image->depth_surface.isl,
-                               &image->hiz_surface.isl);
-         add_surface(image, &image->hiz_surface);
+                               &image->aux_surface.isl);
+         add_surface(image, &image->aux_surface);
       }
    }
 
@@ -275,8 +280,12 @@ anv_DestroyImage(VkDevice _device, VkImage _image,
                  const VkAllocationCallbacks *pAllocator)
 {
    ANV_FROM_HANDLE(anv_device, device, _device);
+   ANV_FROM_HANDLE(anv_image, image, _image);
 
-   vk_free2(&device->alloc, pAllocator, anv_image_from_handle(_image));
+   if (!image)
+      return;
+
+   vk_free2(&device->alloc, pAllocator, image);
 }
 
 VkResult anv_BindImageMemory(
@@ -302,16 +311,16 @@ VkResult anv_BindImageMemory(
       /* The offset and size must be a multiple of 4K or else the
        * anv_gem_mmap call below will return NULL.
        */
-      assert((image->offset + image->hiz_surface.offset) % 4096 == 0);
-      assert(image->hiz_surface.isl.size % 4096 == 0);
+      assert((image->offset + image->aux_surface.offset) % 4096 == 0);
+      assert(image->aux_surface.isl.size % 4096 == 0);
 
       /* HiZ surfaces need to have their memory cleared to 0 before they
        * can be used.  If we let it have garbage data, it can cause GPU
        * hangs on some hardware.
        */
       void *map = anv_gem_mmap(device, image->bo->gem_handle,
-                               image->offset + image->hiz_surface.offset,
-                               image->hiz_surface.isl.size,
+                               image->offset + image->aux_surface.offset,
+                               image->aux_surface.isl.size,
                                device->info.has_llc ? 0 : I915_MMAP_WC);
 
       /* If anv_gem_mmap returns NULL, it's likely that the kernel was
@@ -320,9 +329,9 @@ VkResult anv_BindImageMemory(
       if (map == NULL)
          return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-      memset(map, 0, image->hiz_surface.isl.size);
+      memset(map, 0, image->aux_surface.isl.size);
 
-      anv_gem_munmap(map, image->hiz_surface.isl.size);
+      anv_gem_munmap(map, image->aux_surface.isl.size);
    }
 
    return VK_SUCCESS;
@@ -565,6 +574,9 @@ anv_DestroyImageView(VkDevice _device, VkImageView _iview,
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_image_view, iview, _iview);
 
+   if (!iview)
+      return;
+
    if (iview->color_rt_surface_state.alloc_size > 0) {
       anv_state_pool_free(&device->surface_state_pool,
                           iview->color_rt_surface_state);
@@ -654,6 +666,9 @@ anv_DestroyBufferView(VkDevice _device, VkBufferView bufferView,
 {
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_buffer_view, view, bufferView);
+
+   if (!view)
+      return;
 
    if (view->surface_state.alloc_size > 0)
       anv_state_pool_free(&device->surface_state_pool,

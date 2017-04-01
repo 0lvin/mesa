@@ -340,6 +340,7 @@ struct si_ps_prolog_bits {
 struct si_ps_epilog_bits {
 	unsigned	spi_shader_col_format;
 	unsigned	color_is_int8:8;
+	unsigned	color_is_int10:8;
 	unsigned	last_cbuf:3;
 	unsigned	alpha_func:3;
 	unsigned	alpha_to_one:1;
@@ -482,6 +483,8 @@ int si_shader_binary_upload(struct si_screen *sscreen, struct si_shader *shader)
 void si_shader_dump(struct si_screen *sscreen, struct si_shader *shader,
 		    struct pipe_debug_callback *debug, unsigned processor,
 		    FILE *f);
+void si_multiwave_lds_size_workaround(struct si_screen *sscreen,
+				      unsigned *lds_size);
 void si_shader_apply_scratch_relocs(struct si_context *sctx,
 			struct si_shader *shader,
 			struct si_shader_config *config,

@@ -267,17 +267,7 @@ si_make_texture_descriptor(struct radv_device *device,
 
 	if (desc->colorspace == VK_FORMAT_COLORSPACE_ZS) {
 		const unsigned char swizzle_xxxx[4] = {0, 0, 0, 0};
-		const unsigned char swizzle_yyyy[4] = {1, 1, 1, 1};
-
-		switch (vk_format) {
-		case VK_FORMAT_X8_D24_UNORM_PACK32:
-		case VK_FORMAT_D24_UNORM_S8_UINT:
-		case VK_FORMAT_D32_SFLOAT_S8_UINT:
-			vk_format_compose_swizzles(mapping, swizzle_yyyy, swizzle);
-			break;
-		default:
-			vk_format_compose_swizzles(mapping, swizzle_xxxx, swizzle);
-		}
+		vk_format_compose_swizzles(mapping, swizzle_xxxx, swizzle);
 	} else {
 		vk_format_compose_swizzles(mapping, desc->swizzle, swizzle);
 	}
@@ -520,6 +510,7 @@ radv_image_alloc_fmask(struct radv_device *device,
 
 	image->fmask.offset = align64(image->size, image->fmask.alignment);
 	image->size = image->fmask.offset + image->fmask.size;
+	image->alignment = MAX2(image->alignment, image->fmask.alignment);
 }
 
 static void
@@ -585,6 +576,7 @@ radv_image_alloc_cmask(struct radv_device *device,
 	/* + 8 for storing the clear values */
 	image->clear_value_offset = image->cmask.offset + image->cmask.size;
 	image->size = image->cmask.offset + image->cmask.size + 8;
+	image->alignment = MAX2(image->alignment, image->cmask.alignment);
 }
 
 static void
@@ -595,6 +587,7 @@ radv_image_alloc_dcc(struct radv_device *device,
 	/* + 8 for storing the clear values */
 	image->clear_value_offset = image->dcc_offset + image->surface.dcc_size;
 	image->size = image->dcc_offset + image->surface.dcc_size + 8;
+	image->alignment = MAX2(image->alignment, image->surface.dcc_alignment);
 }
 
 static unsigned
@@ -664,6 +657,9 @@ radv_image_alloc_htile(struct radv_device *device,
 		       struct radv_image *image)
 {
 	if (env_var_as_boolean("RADV_HIZ_DISABLE", false))
+		return;
+
+	if (image->array_size > 1 || image->levels > 1)
 		return;
 
 	image->htile.size = radv_image_get_htile_size(device, image);
@@ -775,8 +771,13 @@ radv_image_view_init(struct radv_image_view *iview,
 	iview->vk_format = pCreateInfo->format;
 	iview->aspect_mask = pCreateInfo->subresourceRange.aspectMask;
 
-	if (iview->aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT)
+	if (iview->aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
 		is_stencil = true;
+		iview->vk_format = vk_format_stencil_only(iview->vk_format);
+	} else if (iview->aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
+		iview->vk_format = vk_format_depth_only(iview->vk_format);
+	}
+
 	iview->extent = (VkExtent3D) {
 		.width  = radv_minify(image->extent.width , range->baseMipLevel),
 		.height = radv_minify(image->extent.height, range->baseMipLevel),
@@ -794,7 +795,7 @@ radv_image_view_init(struct radv_image_view *iview,
 
 	si_make_texture_descriptor(device, image, false,
 				   iview->type,
-				   pCreateInfo->format,
+				   iview->vk_format,
 				   &pCreateInfo->components,
 				   0, radv_get_levelCount(image, range) - 1,
 				   range->baseArrayLayer,
@@ -836,29 +837,29 @@ void radv_image_set_optimal_micro_tile_mode(struct radv_device *device,
 		switch (micro_tile_mode) {
 		case 0: /* displayable */
 			switch (image->surface.bpe) {
-			case 8:
+			case 1:
                             image->surface.tiling_index[0] = 10;
                             break;
-			case 16:
+			case 2:
                             image->surface.tiling_index[0] = 11;
                             break;
-			default: /* 32, 64 */
+			default: /* 4, 8 */
                             image->surface.tiling_index[0] = 12;
                             break;
 			}
 			break;
 		case 1: /* thin */
 			switch (image->surface.bpe) {
-			case 8:
+			case 1:
                                 image->surface.tiling_index[0] = 14;
                                 break;
-			case 16:
+			case 2:
                                 image->surface.tiling_index[0] = 15;
                                 break;
-			case 32:
+			case 4:
                                 image->surface.tiling_index[0] = 16;
                                 break;
-			default: /* 64, 128 */
+			default: /* 8, 16 */
                                 image->surface.tiling_index[0] = 17;
                                 break;
 			}

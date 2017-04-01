@@ -62,10 +62,14 @@ glsl_tests_blob_test_LDADD =				\
 
 glsl_tests_cache_test_SOURCES =				\
 	glsl/tests/cache_test.c
+glsl_tests_cache_test_CFLAGS =				\
+	$(PTHREAD_CFLAGS)
 glsl_tests_cache_test_LDADD =				\
-	glsl/libglsl.la
+	glsl/libglsl.la					\
+	$(PTHREAD_LIBS)
 
 glsl_tests_general_ir_test_SOURCES =			\
+	glsl/tests/array_refcount_test.cpp 		\
 	glsl/tests/builtin_variable_test.cpp		\
 	glsl/tests/invalidate_locations_test.cpp	\
 	glsl/tests/general_ir_test.cpp			\

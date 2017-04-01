@@ -56,6 +56,7 @@ blorp_params_get_clear_kernel(struct blorp_context *blorp,
 
    nir_builder b;
    nir_builder_init_simple_shader(&b, NULL, MESA_SHADER_FRAGMENT, NULL);
+   nir_builder_init_simple_shader(&b, mem_ctx, MESA_SHADER_FRAGMENT, NULL);
    b.shader->info.name = ralloc_strdup(b.shader, "BLORP-clear");
 
    nir_variable *v_color = nir_variable_create(b.shader, nir_var_shader_in,
@@ -73,15 +74,15 @@ blorp_params_get_clear_kernel(struct blorp_context *blorp,
    struct brw_wm_prog_key wm_key;
    brw_blorp_init_wm_prog_key(&wm_key);
 
-   struct brw_blorp_prog_data prog_data;
+   struct brw_wm_prog_data prog_data;
    unsigned program_size;
    const unsigned *program =
-      brw_blorp_compile_nir_shader(blorp, b.shader, &wm_key, use_replicated_data,
-                                   &prog_data, &program_size);
+      blorp_compile_fs(blorp, mem_ctx, b.shader, &wm_key, use_replicated_data,
+                       &prog_data, &program_size);
 
    blorp->upload_shader(blorp, &blorp_key, sizeof(blorp_key),
                         program, program_size,
-                        &prog_data, sizeof(prog_data),
+                        &prog_data.base, sizeof(prog_data),
                         &params->wm_prog_kernel, &params->wm_prog_data);
 
    ralloc_free(mem_ctx);
@@ -238,6 +239,26 @@ blorp_fast_clear(struct blorp_batch *batch,
    batch->blorp->exec(batch, &params);
 }
 
+static union isl_color_value
+swizzle_color_value(union isl_color_value src, struct isl_swizzle swizzle)
+{
+   union isl_color_value dst = { .u32 = { 0, } };
+
+   /* We assign colors in ABGR order so that the first one will be taken in
+    * RGBA precedence order.  According to the PRM docs for shader channel
+    * select, this matches Haswell hardware behavior.
+    */
+   if ((unsigned)(swizzle.a - ISL_CHANNEL_SELECT_RED) < 4)
+      dst.u32[swizzle.a - ISL_CHANNEL_SELECT_RED] = src.u32[3];
+   if ((unsigned)(swizzle.b - ISL_CHANNEL_SELECT_RED) < 4)
+      dst.u32[swizzle.b - ISL_CHANNEL_SELECT_RED] = src.u32[2];
+   if ((unsigned)(swizzle.g - ISL_CHANNEL_SELECT_RED) < 4)
+      dst.u32[swizzle.g - ISL_CHANNEL_SELECT_RED] = src.u32[1];
+   if ((unsigned)(swizzle.r - ISL_CHANNEL_SELECT_RED) < 4)
+      dst.u32[swizzle.r - ISL_CHANNEL_SELECT_RED] = src.u32[0];
+
+   return dst;
+}
 
 void
 blorp_clear(struct blorp_batch *batch,
@@ -256,9 +277,24 @@ blorp_clear(struct blorp_batch *batch,
    params.x1 = x1;
    params.y1 = y1;
 
+   /* Manually apply the clear destination swizzle.  This way swizzled clears
+    * will work for swizzles which we can't normally use for rendering and it
+    * also ensures that they work on pre-Haswell hardware which can't swizlle
+    * at all.
+    */
+   clear_color = swizzle_color_value(clear_color, swizzle);
+   swizzle = ISL_SWIZZLE_IDENTITY;
+
    if (format == ISL_FORMAT_R9G9B9E5_SHAREDEXP) {
       clear_color.u32[0] = float3_to_rgb9e5(clear_color.f32);
       format = ISL_FORMAT_R32_UINT;
+   } else if (format == ISL_FORMAT_A4B4G4R4_UNORM) {
+      /* Broadwell and earlier cannot render to this format so we need to work
+       * around it by swapping the colors around and using B4G4R4A4 instead.
+       */
+      const struct isl_swizzle ARGB = ISL_SWIZZLE(ALPHA, RED, GREEN, BLUE);
+      clear_color = swizzle_color_value(clear_color, ARGB);
+      format = ISL_FORMAT_B4G4R4A4_UNORM;
    }
 
    memcpy(&params.wm_inputs, clear_color.f32, sizeof(float) * 4);
