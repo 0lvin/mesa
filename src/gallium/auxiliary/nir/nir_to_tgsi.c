@@ -1223,8 +1223,7 @@ static bool
 ntt_emit_if_as_conditional_discard(struct ntt_compile *c, nir_if *if_stmt)
 {
    /* XXX: Detect that it is actually this style of IF. */
-   nir_cf_node *first_if_node = nir_if_first_then_node(if_stmt);
-   nir_block *block = nir_cf_node_as_block(first_if_node);
+   nir_block *block = nir_if_first_then_block(if_stmt);
    nir_instr *instr = nir_block_first_instr(block);
 
    nir_intrinsic_instr *discard = nir_instr_as_intrinsic(instr);
@@ -1279,7 +1278,7 @@ ntt_emit_loop(struct ntt_compile *c, nir_loop *loop)
 static void
 ntt_emit_block(struct ntt_compile *c, nir_block *block)
 {
-   nir_foreach_instr(block, instr) {
+   nir_foreach_instr(instr, block) {
       ntt_emit_instr(c, instr);
    }
 }
@@ -1338,8 +1337,8 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    }
 
 
-   nir_lower_io(s, nir_var_shader_in, glsl_type_size_vec4);
-   nir_lower_io(s, nir_var_shader_out, glsl_type_size_vec4);
+   nir_lower_io(s, nir_var_shader_in, glsl_type_size_vec4, 0);
+   nir_lower_io(s, nir_var_shader_out, glsl_type_size_vec4, 0);
 
    nir_print_shader(s, stdout);
    c = rzalloc(NULL, struct ntt_compile);
@@ -1368,7 +1367,7 @@ nir_to_tgsi(struct nir_shader *s, unsigned tgsi_target)
    ntt_setup_registers(c, &c->s->registers);
 
    /* Find the main function and emit the body. */
-   nir_foreach_function(c->s, function) {
+   nir_foreach_function(function, c->s) {
      if (strcmp(function->name, "main"))
        continue;
       assert(function->impl);

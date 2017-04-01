@@ -2,7 +2,7 @@
 #include "val_private.h"
 
 #include "pipe-loader/pipe_loader.h"
-#include "mesa/main/git_sha1.h"
+#include "git_sha1.h"
 
 #include "pipe/p_state.h"
 #include "state_tracker/drisw_api.h"
