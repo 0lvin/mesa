@@ -27,6 +27,7 @@
  */
 
 #include <unistd.h>
+#include <fcntl.h>
 #include "xa_tracker.h"
 #include "xa_priv.h"
 #include "pipe/p_state.h"
@@ -152,12 +153,12 @@ xa_tracker_create(int drm_fd)
     struct xa_tracker *xa = calloc(1, sizeof(struct xa_tracker));
     enum xa_surface_type stype;
     unsigned int num_formats;
-    int fd = -1;
+    int fd;
 
     if (!xa)
 	return NULL;
 
-    if (drm_fd < 0 || (fd = dup(drm_fd)) < 0)
+    if (drm_fd < 0 || (fd = fcntl(drm_fd, F_DUPFD_CLOEXEC, 3)) < 0)
 	goto out_no_fd;
 
     if (pipe_loader_drm_probe_fd(&xa->dev, fd))
@@ -212,9 +213,9 @@ xa_tracker_create(int drm_fd)
  out_no_screen:
     if (xa->dev)
 	pipe_loader_release(&xa->dev, 1);
-    fd = -1;
+    else
+	close(fd);
  out_no_fd:
-    close(fd);
     free(xa);
     return NULL;
 }
@@ -549,7 +550,8 @@ xa_surface_handle(struct xa_surface *srf,
 
     memset(&whandle, 0, sizeof(whandle));
     whandle.type = handle_type(type);
-    res = screen->resource_get_handle(screen, srf->tex, &whandle,
+    res = screen->resource_get_handle(screen, srf->xa->default_ctx->pipe,
+                                      srf->tex, &whandle,
                                       PIPE_HANDLE_USAGE_READ_WRITE);
     if (!res)
 	return -XA_ERR_INVAL;

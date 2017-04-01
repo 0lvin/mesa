@@ -514,7 +514,7 @@ dri2GetCurrentContext()
    struct glx_context *gc = __glXGetCurrentContext();
    struct dri2_context *dri2Ctx = (struct dri2_context *)gc;
 
-   return dri2Ctx ? dri2Ctx->driContext : NULL;
+   return (gc != &dummyContext) ? dri2Ctx->driContext : NULL;
 }
 
 /**
@@ -1206,7 +1206,7 @@ dri2CreateScreen(int screen, struct glx_display * priv)
    /* If Mesa knows about the appropriate driver for this fd, then trust it.
     * Otherwise, default to the server's value.
     */
-   loader_driverName = loader_get_driver_for_fd(psc->fd, 0);
+   loader_driverName = loader_get_driver_for_fd(psc->fd);
    if (loader_driverName) {
       free(driverName);
       driverName = loader_driverName;

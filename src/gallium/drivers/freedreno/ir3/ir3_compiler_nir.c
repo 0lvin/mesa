@@ -181,7 +181,7 @@ compile_init(struct ir3_compiler *compiler,
 		nir_print_shader(ctx->s, stdout);
 	}
 
-	so->first_driver_param = so->first_immediate = ctx->s->num_uniforms;
+	so->first_driver_param = so->first_immediate = align(ctx->s->num_uniforms, 4);
 
 	/* Layout of constant registers:
 	 *
@@ -282,7 +282,7 @@ get_dst_ssa(struct ir3_compile *ctx, nir_ssa_def *dst, unsigned n)
 	return __get_dst(ctx, dst, n);
 }
 
-static struct ir3_instruction **
+static struct ir3_instruction * const *
 get_src(struct ir3_compile *ctx, nir_src *src)
 {
 	struct hash_entry *entry;
@@ -568,48 +568,6 @@ create_frag_coord(struct ir3_compile *ctx, unsigned comp)
 	default:
 		/* seems that we can use these as-is: */
 		return ctx->frag_coord[comp];
-	}
-}
-
-/* NOTE: this creates the "TGSI" style fragface (ie. input slot
- * VARYING_SLOT_FACE).  For NIR style nir_intrinsic_load_front_face
- * we can just use the value from hw directly (since it is boolean)
- */
-static struct ir3_instruction *
-create_frag_face(struct ir3_compile *ctx, unsigned comp)
-{
-	struct ir3_block *block = ctx->block;
-	struct ir3_instruction *instr;
-
-	switch (comp) {
-	case 0: /* .x */
-		compile_assert(ctx, !ctx->frag_face);
-
-		ctx->frag_face = create_input(block, 0);
-		ctx->frag_face->regs[0]->flags |= IR3_REG_HALF;
-
-		/* for faceness, we always get -1 or 0 (int).. but TGSI expects
-		 * positive vs negative float.. and piglit further seems to
-		 * expect -1.0 or 1.0:
-		 *
-		 *    mul.s tmp, hr0.x, 2
-		 *    add.s tmp, tmp, 1
-		 *    mov.s32f32, dst, tmp
-		 *
-		 */
-		instr = ir3_MUL_S(block, ctx->frag_face, 0,
-				create_immed(block, 2), 0);
-		instr = ir3_ADD_S(block, instr, 0,
-				create_immed(block, 1), 0);
-		instr = ir3_COV(block, instr, TYPE_S32, TYPE_F32);
-
-		return instr;
-	case 1: /* .y */
-	case 2: /* .z */
-		return create_immed(block, fui(0.0));
-	default:
-	case 3: /* .w */
-		return create_immed(block, fui(1.0));
 	}
 }
 
@@ -1105,7 +1063,8 @@ emit_intrinsic_store_var(struct ir3_compile *ctx, nir_intrinsic_instr *intr)
 	nir_deref_var *dvar = intr->variables[0];
 	nir_deref_array *darr = nir_deref_as_array(dvar->deref.child);
 	struct ir3_array *arr = get_var(ctx, dvar->var);
-	struct ir3_instruction *addr, **src;
+	struct ir3_instruction *addr;
+	struct ir3_instruction * const *src;
 	unsigned wrmask = nir_intrinsic_write_mask(intr);
 
 	compile_assert(ctx, dvar->deref.child &&
@@ -1146,7 +1105,7 @@ static void add_sysval_input(struct ir3_compile *ctx, gl_system_value slot,
 	so->inputs[n].slot = slot;
 	so->inputs[n].compmask = 1;
 	so->inputs[n].regid = r;
-	so->inputs[n].interpolate = INTERP_QUALIFIER_FLAT;
+	so->inputs[n].interpolate = INTERP_MODE_FLAT;
 	so->total_in++;
 
 	ctx->ir->ninputs = MAX2(ctx->ir->ninputs, r + 1);
@@ -1157,7 +1116,8 @@ static void
 emit_intrinsic(struct ir3_compile *ctx, nir_intrinsic_instr *intr)
 {
 	const nir_intrinsic_info *info = &nir_intrinsic_infos[intr->intrinsic];
-	struct ir3_instruction **dst, **src;
+	struct ir3_instruction **dst;
+	struct ir3_instruction * const *src;
 	struct ir3_block *b = ctx->block;
 	nir_const_value *const_offset;
 	int idx;
@@ -1385,7 +1345,8 @@ emit_tex(struct ir3_compile *ctx, nir_tex_instr *tex)
 {
 	struct ir3_block *b = ctx->block;
 	struct ir3_instruction **dst, *sam, *src0[12], *src1[4];
-	struct ir3_instruction **coord, *lod, *compare, *proj, **off, **ddx, **ddy;
+	struct ir3_instruction * const *coord, * const *off, * const *ddx, * const *ddy;
+	struct ir3_instruction *lod, *compare, *proj;
 	bool has_bias = false, has_lod = false, has_proj = false, has_off = false;
 	unsigned i, coords, flags;
 	unsigned nsrc0 = 0, nsrc1 = 0;
@@ -1448,22 +1409,12 @@ emit_tex(struct ir3_compile *ctx, nir_tex_instr *tex)
 	case nir_texop_query_levels:
 	case nir_texop_texture_samples:
 	case nir_texop_samples_identical:
+	case nir_texop_txf_ms_mcs:
 		compile_error(ctx, "Unhandled NIR tex type: %d\n", tex->op);
 		return;
 	}
 
 	tex_info(tex, &flags, &coords);
-
-	/* scale up integer coords for TXF based on the LOD */
-	if (ctx->unminify_coords && (opc == OPC_ISAML)) {
-		assert(has_lod);
-		for (i = 0; i < coords; i++)
-			coord[i] = ir3_SHL_B(b, coord[i], 0, lod, 0);
-	}
-
-	/* the array coord for cube arrays needs 0.5 added to it */
-	if (ctx->array_index_add_half && tex->is_array && (opc != OPC_ISAML))
-		coord[coords] = ir3_ADD_F(b, coord[coords], 0, create_immed(b, fui(0.5)), 0);
 
 	/*
 	 * lay out the first argument in the proper order:
@@ -1478,7 +1429,16 @@ emit_tex(struct ir3_compile *ctx, nir_tex_instr *tex)
 
 	/* insert tex coords: */
 	for (i = 0; i < coords; i++)
-		src0[nsrc0++] = coord[i];
+		src0[i] = coord[i];
+
+	nsrc0 = i;
+
+	/* scale up integer coords for TXF based on the LOD */
+	if (ctx->unminify_coords && (opc == OPC_ISAML)) {
+		assert(has_lod);
+		for (i = 0; i < coords; i++)
+			src0[i] = ir3_SHL_B(b, src0[i], 0, lod, 0);
+	}
 
 	if (coords == 1) {
 		/* hw doesn't do 1d, so we treat it as 2d with
@@ -1491,8 +1451,15 @@ emit_tex(struct ir3_compile *ctx, nir_tex_instr *tex)
 	if (tex->is_shadow && tex->op != nir_texop_lod)
 		src0[nsrc0++] = compare;
 
-	if (tex->is_array && tex->op != nir_texop_lod)
-		src0[nsrc0++] = coord[coords];
+	if (tex->is_array && tex->op != nir_texop_lod) {
+		struct ir3_instruction *idx = coord[coords];
+
+		/* the array coord for cube arrays needs 0.5 added to it */
+		if (ctx->array_index_add_half && (opc != OPC_ISAML))
+			idx = ir3_ADD_F(b, idx, 0, create_immed(b, fui(0.5)), 0);
+
+		src0[nsrc0++] = idx;
+	}
 
 	if (has_proj) {
 		src0[nsrc0++] = proj;
@@ -1620,7 +1587,8 @@ static void
 emit_tex_txs(struct ir3_compile *ctx, nir_tex_instr *tex)
 {
 	struct ir3_block *b = ctx->block;
-	struct ir3_instruction **dst, *sam, *lod;
+	struct ir3_instruction **dst, *sam;
+	struct ir3_instruction *lod;
 	unsigned flags, coords;
 
 	tex_info(tex, &flags, &coords);
@@ -1811,7 +1779,7 @@ emit_block(struct ir3_compile *ctx, nir_block *nblock)
 	_mesa_hash_table_destroy(ctx->addr_ht, NULL);
 	ctx->addr_ht = NULL;
 
-	nir_foreach_instr(nblock, instr) {
+	nir_foreach_instr(instr, nblock) {
 		emit_instr(ctx, instr);
 		if (ctx->error)
 			return;
@@ -2013,6 +1981,10 @@ setup_input(struct ir3_compile *ctx, nir_variable *in)
 	DBG("; in: slot=%u, len=%ux%u, drvloc=%u",
 			slot, array_len, ncomp, n);
 
+	/* let's pretend things other than vec4 don't exist: */
+	ncomp = MAX2(ncomp, 4);
+	compile_assert(ctx, ncomp == 4);
+
 	so->inputs[n].slot = slot;
 	so->inputs[n].compmask = (1 << ncomp) - 1;
 	so->inputs_count = MAX2(so->inputs_count, n + 1);
@@ -2027,10 +1999,18 @@ setup_input(struct ir3_compile *ctx, nir_variable *in)
 				so->inputs[n].bary = false;
 				so->frag_coord = true;
 				instr = create_frag_coord(ctx, i);
-			} else if (slot == VARYING_SLOT_FACE) {
-				so->inputs[n].bary = false;
-				so->frag_face = true;
-				instr = create_frag_face(ctx, i);
+			} else if (slot == VARYING_SLOT_PNTC) {
+				/* see for example st_get_generic_varying_index().. this is
+				 * maybe a bit mesa/st specific.  But we need things to line
+				 * up for this in fdN_program:
+				 *    unsigned texmask = 1 << (slot - VARYING_SLOT_VAR0);
+				 *    if (emit->sprite_coord_enable & texmask) {
+				 *       ...
+				 *    }
+				 */
+				so->inputs[n].slot = VARYING_SLOT_VAR8;
+				so->inputs[n].bary = true;
+				instr = create_frag_input(ctx, false);
 			} else {
 				bool use_ldlv = false;
 
@@ -2038,7 +2018,7 @@ setup_input(struct ir3_compile *ctx, nir_variable *in)
 				 * we need to do flat vs smooth shading depending on
 				 * rast state:
 				 */
-				if (in->data.interpolation == INTERP_QUALIFIER_NONE) {
+				if (in->data.interpolation == INTERP_MODE_NONE) {
 					switch (slot) {
 					case VARYING_SLOT_COL0:
 					case VARYING_SLOT_COL1:
@@ -2052,7 +2032,7 @@ setup_input(struct ir3_compile *ctx, nir_variable *in)
 				}
 
 				if (ctx->flat_bypass) {
-					if ((so->inputs[n].interpolate == INTERP_QUALIFIER_FLAT) ||
+					if ((so->inputs[n].interpolate == INTERP_MODE_FLAT) ||
 							(so->inputs[n].rasterflat && ctx->so->key.rasterflat))
 						use_ldlv = true;
 				}
@@ -2062,11 +2042,14 @@ setup_input(struct ir3_compile *ctx, nir_variable *in)
 				instr = create_frag_input(ctx, use_ldlv);
 			}
 
+			compile_assert(ctx, idx < ctx->ir->ninputs);
+
 			ctx->ir->inputs[idx] = instr;
 		}
 	} else if (ctx->so->type == SHADER_VERTEX) {
 		for (int i = 0; i < ncomp; i++) {
 			unsigned idx = (n * 4) + i;
+			compile_assert(ctx, idx < ctx->ir->ninputs);
 			ctx->ir->inputs[idx] = create_input(ctx->block, idx);
 		}
 	} else {
@@ -2090,6 +2073,10 @@ setup_output(struct ir3_compile *ctx, nir_variable *out)
 
 	DBG("; out: slot=%u, len=%ux%u, drvloc=%u",
 			slot, array_len, ncomp, n);
+
+	/* let's pretend things other than vec4 don't exist: */
+	ncomp = MAX2(ncomp, 4);
+	compile_assert(ctx, ncomp == 4);
 
 	if (ctx->so->type == SHADER_FRAGMENT) {
 		switch (slot) {
@@ -2145,32 +2132,34 @@ setup_output(struct ir3_compile *ctx, nir_variable *out)
 
 	for (int i = 0; i < ncomp; i++) {
 		unsigned idx = (n * 4) + i;
-
+		compile_assert(ctx, idx < ctx->ir->noutputs);
 		ctx->ir->outputs[idx] = create_immed(ctx->block, fui(0.0));
 	}
+}
+
+static int
+max_drvloc(struct exec_list *vars)
+{
+	int drvloc = -1;
+	nir_foreach_variable(var, vars) {
+		drvloc = MAX2(drvloc, (int)var->data.driver_location);
+	}
+	return drvloc;
 }
 
 static void
 emit_instructions(struct ir3_compile *ctx)
 {
 	unsigned ninputs, noutputs;
-	nir_function_impl *fxn = NULL;
+	nir_function_impl *fxn = nir_shader_get_entrypoint(ctx->s);
 
-	/* Find the main function: */
-	nir_foreach_function(ctx->s, function) {
-		compile_assert(ctx, strcmp(function->name, "main") == 0);
-		compile_assert(ctx, function->impl);
-		fxn = function->impl;
-		break;
-	}
-
-	ninputs  = exec_list_length(&ctx->s->inputs) * 4;
-	noutputs = exec_list_length(&ctx->s->outputs) * 4;
+	ninputs  = (max_drvloc(&ctx->s->inputs) + 1) * 4;
+	noutputs = (max_drvloc(&ctx->s->outputs) + 1) * 4;
 
 	/* or vtx shaders, we need to leave room for sysvals:
 	 */
 	if (ctx->so->type == SHADER_VERTEX) {
-		ninputs += 8;
+		ninputs += 16;
 	}
 
 	ctx->ir = ir3_create(ctx->compiler, ninputs, noutputs);
@@ -2181,7 +2170,7 @@ emit_instructions(struct ir3_compile *ctx)
 	list_addtail(&ctx->block->node, &ctx->ir->block_list);
 
 	if (ctx->so->type == SHADER_VERTEX) {
-		ctx->ir->ninputs -= 8;
+		ctx->ir->ninputs -= 16;
 	}
 
 	/* for fragment shader, we have a single input register (usually
@@ -2419,7 +2408,7 @@ ir3_compile_shader_nir(struct ir3_compiler *compiler,
 		ir3_print(ir);
 	}
 
-	ir3_cp(ir);
+	ir3_cp(ir, so);
 
 	if (fd_mesa_debug & FD_DBG_OPTMSGS) {
 		printf("BEFORE GROUPING:\n");
@@ -2463,12 +2452,6 @@ ir3_compile_shader_nir(struct ir3_compiler *compiler,
 	/* fixup input/outputs: */
 	for (i = 0; i < so->outputs_count; i++) {
 		so->outputs[i].regid = ir->outputs[i*4]->regs[0]->num;
-		/* preserve hack for depth output.. tgsi writes depth to .z,
-		 * but what we give the hw is the scalar register:
-		 */
-		if ((so->type == SHADER_FRAGMENT) &&
-			(so->outputs[i].slot == FRAG_RESULT_DEPTH))
-			so->outputs[i].regid += 2;
 	}
 
 	/* Note that some or all channels of an input may be unused: */

@@ -33,11 +33,10 @@ class saturate_propagation_test : public ::testing::Test {
 
 public:
    struct brw_compiler *compiler;
-   struct brw_device_info *devinfo;
+   struct gen_device_info *devinfo;
    struct gl_context *ctx;
    struct brw_wm_prog_data *prog_data;
    struct gl_shader_program *shader_prog;
-   struct brw_fragment_program *fp;
    fs_visitor *v;
 };
 
@@ -57,16 +56,13 @@ void saturate_propagation_test::SetUp()
 {
    ctx = (struct gl_context *)calloc(1, sizeof(*ctx));
    compiler = (struct brw_compiler *)calloc(1, sizeof(*compiler));
-   devinfo = (struct brw_device_info *)calloc(1, sizeof(*devinfo));
+   devinfo = (struct gen_device_info *)calloc(1, sizeof(*devinfo));
    compiler->devinfo = devinfo;
 
-   fp = ralloc(NULL, struct brw_fragment_program);
    prog_data = ralloc(NULL, struct brw_wm_prog_data);
    nir_shader *shader = nir_shader_create(NULL, MESA_SHADER_FRAGMENT, NULL);
 
    v = new saturate_propagation_fs_visitor(compiler, prog_data, shader);
-
-   _mesa_init_gl_program(&fp->program.Base, GL_FRAGMENT_SHADER, 0);
 
    devinfo->gen = 4;
 }
@@ -529,7 +525,7 @@ TEST_F(saturate_propagation_test, intervening_dest_write)
    fs_reg src2 = v->vgrf(glsl_type::vec2_type);
    bld.ADD(offset(dst0, bld, 2), src0, src1);
    bld.emit(SHADER_OPCODE_TEX, dst0, src2)
-      ->regs_written = 4;
+      ->size_written = 4 * REG_SIZE;
    set_saturate(true, bld.MOV(dst1, offset(dst0, bld, 2)));
 
    /* = Before =

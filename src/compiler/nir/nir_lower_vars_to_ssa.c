@@ -404,11 +404,10 @@ register_copy_instr(nir_intrinsic_instr *copy_instr,
 
 /* Registers all variable uses in the given block. */
 static bool
-register_variable_uses_block(nir_block *block, void *void_state)
+register_variable_uses_block(nir_block *block,
+                             struct lower_variables_state *state)
 {
-   struct lower_variables_state *state = void_state;
-
-   nir_foreach_instr_safe(block, instr) {
+   nir_foreach_instr_safe(instr, block) {
       if (instr->type != nir_instr_type_intrinsic)
          continue;
 
@@ -472,7 +471,7 @@ lower_copies_to_load_store(struct deref_node *node,
    return true;
 }
 
-/* Performs variable renaming by doing a DFS of the dominance tree
+/* Performs variable renaming
  *
  * This algorithm is very similar to the one outlined in "Efficiently
  * Computing Static Single Assignment Form and the Control Dependence
@@ -480,132 +479,131 @@ lower_copies_to_load_store(struct deref_node *node,
  * SSA def on the stack per block.
  */
 static bool
-rename_variables_block(nir_block *block, struct lower_variables_state *state)
+rename_variables(struct lower_variables_state *state)
 {
    nir_builder b;
    nir_builder_init(&b, state->impl);
 
-   nir_foreach_instr_safe(block, instr) {
-      if (instr->type != nir_instr_type_intrinsic)
-         continue;
+   nir_foreach_block(block, state->impl) {
+      nir_foreach_instr_safe(instr, block) {
+         if (instr->type != nir_instr_type_intrinsic)
+            continue;
 
-      nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+         nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
 
-      switch (intrin->intrinsic) {
-      case nir_intrinsic_load_var: {
-         struct deref_node *node =
-            get_deref_node(intrin->variables[0], state);
+         switch (intrin->intrinsic) {
+         case nir_intrinsic_load_var: {
+            struct deref_node *node =
+               get_deref_node(intrin->variables[0], state);
 
-         if (node == NULL) {
-            /* If we hit this path then we are referencing an invalid
-             * value.  Most likely, we unrolled something and are
-             * reading past the end of some array.  In any case, this
-             * should result in an undefined value.
-             */
-            nir_ssa_undef_instr *undef =
-               nir_ssa_undef_instr_create(state->shader,
-                                          intrin->num_components,
-                                          intrin->dest.ssa.bit_size);
+            if (node == NULL) {
+               /* If we hit this path then we are referencing an invalid
+                * value.  Most likely, we unrolled something and are
+                * reading past the end of some array.  In any case, this
+                * should result in an undefined value.
+                */
+               nir_ssa_undef_instr *undef =
+                  nir_ssa_undef_instr_create(state->shader,
+                                             intrin->num_components,
+                                             intrin->dest.ssa.bit_size);
 
-            nir_instr_insert_before(&intrin->instr, &undef->instr);
+               nir_instr_insert_before(&intrin->instr, &undef->instr);
+               nir_instr_remove(&intrin->instr);
+
+               nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
+                                        nir_src_for_ssa(&undef->def));
+               continue;
+            }
+
+            if (!node->lower_to_ssa)
+               continue;
+
+            nir_alu_instr *mov = nir_alu_instr_create(state->shader,
+                                                      nir_op_imov);
+            mov->src[0].src = nir_src_for_ssa(
+               nir_phi_builder_value_get_block_def(node->pb_value, block));
+            for (unsigned i = intrin->num_components; i < 4; i++)
+               mov->src[0].swizzle[i] = 0;
+
+            assert(intrin->dest.is_ssa);
+
+            mov->dest.write_mask = (1 << intrin->num_components) - 1;
+            nir_ssa_dest_init(&mov->instr, &mov->dest.dest,
+                              intrin->num_components,
+                              intrin->dest.ssa.bit_size, NULL);
+
+            nir_instr_insert_before(&intrin->instr, &mov->instr);
             nir_instr_remove(&intrin->instr);
 
             nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                                     nir_src_for_ssa(&undef->def));
-            continue;
+                                     nir_src_for_ssa(&mov->dest.dest.ssa));
+            break;
          }
 
-         if (!node->lower_to_ssa)
-            continue;
+         case nir_intrinsic_store_var: {
+            struct deref_node *node =
+               get_deref_node(intrin->variables[0], state);
 
-         nir_alu_instr *mov = nir_alu_instr_create(state->shader,
-                                                   nir_op_imov);
-         mov->src[0].src = nir_src_for_ssa(
-            nir_phi_builder_value_get_block_def(node->pb_value, block));
-         for (unsigned i = intrin->num_components; i < 4; i++)
-            mov->src[0].swizzle[i] = 0;
-
-         assert(intrin->dest.is_ssa);
-
-         mov->dest.write_mask = (1 << intrin->num_components) - 1;
-         nir_ssa_dest_init(&mov->instr, &mov->dest.dest,
-                           intrin->num_components,
-                           intrin->dest.ssa.bit_size, NULL);
-
-         nir_instr_insert_before(&intrin->instr, &mov->instr);
-         nir_instr_remove(&intrin->instr);
-
-         nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                                  nir_src_for_ssa(&mov->dest.dest.ssa));
-         break;
-      }
-
-      case nir_intrinsic_store_var: {
-         struct deref_node *node =
-            get_deref_node(intrin->variables[0], state);
-
-         if (node == NULL) {
-            /* Probably an out-of-bounds array store.  That should be a
-             * no-op. */
-            nir_instr_remove(&intrin->instr);
-            continue;
-         }
-
-         if (!node->lower_to_ssa)
-            continue;
-
-         assert(intrin->num_components ==
-                glsl_get_vector_elements(node->type));
-
-         assert(intrin->src[0].is_ssa);
-
-         nir_ssa_def *new_def;
-         b.cursor = nir_before_instr(&intrin->instr);
-
-         unsigned wrmask = nir_intrinsic_write_mask(intrin);
-         if (wrmask == (1 << intrin->num_components) - 1) {
-            /* Whole variable store - just copy the source.  Note that
-             * intrin->num_components and intrin->src[0].ssa->num_components
-             * may differ.
-             */
-            unsigned swiz[4];
-            for (unsigned i = 0; i < 4; i++)
-               swiz[i] = i < intrin->num_components ? i : 0;
-
-            new_def = nir_swizzle(&b, intrin->src[0].ssa, swiz,
-                                  intrin->num_components, false);
-         } else {
-            nir_ssa_def *old_def =
-               nir_phi_builder_value_get_block_def(node->pb_value, block);
-            /* For writemasked store_var intrinsics, we combine the newly
-             * written values with the existing contents of unwritten
-             * channels, creating a new SSA value for the whole vector.
-             */
-            nir_ssa_def *srcs[4];
-            for (unsigned i = 0; i < intrin->num_components; i++) {
-               if (wrmask & (1 << i)) {
-                  srcs[i] = nir_channel(&b, intrin->src[0].ssa, i);
-               } else {
-                  srcs[i] = nir_channel(&b, old_def, i);
-               }
+            if (node == NULL) {
+               /* Probably an out-of-bounds array store.  That should be a
+                * no-op. */
+               nir_instr_remove(&intrin->instr);
+               continue;
             }
-            new_def = nir_vec(&b, srcs, intrin->num_components);
+
+            if (!node->lower_to_ssa)
+               continue;
+
+            assert(intrin->num_components ==
+                   glsl_get_vector_elements(node->type));
+
+            assert(intrin->src[0].is_ssa);
+
+            nir_ssa_def *new_def;
+            b.cursor = nir_before_instr(&intrin->instr);
+
+            unsigned wrmask = nir_intrinsic_write_mask(intrin);
+            if (wrmask == (1 << intrin->num_components) - 1) {
+               /* Whole variable store - just copy the source.  Note that
+                * intrin->num_components and intrin->src[0].ssa->num_components
+                * may differ.
+                */
+               unsigned swiz[4];
+               for (unsigned i = 0; i < 4; i++)
+                  swiz[i] = i < intrin->num_components ? i : 0;
+
+               new_def = nir_swizzle(&b, intrin->src[0].ssa, swiz,
+                                     intrin->num_components, false);
+            } else {
+               nir_ssa_def *old_def =
+                  nir_phi_builder_value_get_block_def(node->pb_value, block);
+               /* For writemasked store_var intrinsics, we combine the newly
+                * written values with the existing contents of unwritten
+                * channels, creating a new SSA value for the whole vector.
+                */
+               nir_ssa_def *srcs[4];
+               for (unsigned i = 0; i < intrin->num_components; i++) {
+                  if (wrmask & (1 << i)) {
+                     srcs[i] = nir_channel(&b, intrin->src[0].ssa, i);
+                  } else {
+                     srcs[i] = nir_channel(&b, old_def, i);
+                  }
+               }
+               new_def = nir_vec(&b, srcs, intrin->num_components);
+            }
+
+            assert(new_def->num_components == intrin->num_components);
+
+            nir_phi_builder_value_set_block_def(node->pb_value, block, new_def);
+            nir_instr_remove(&intrin->instr);
+            break;
          }
 
-         assert(new_def->num_components == intrin->num_components);
-
-         nir_phi_builder_value_set_block_def(node->pb_value, block, new_def);
-         nir_instr_remove(&intrin->instr);
-         break;
-      }
-
-      default:
-         break;
+         default:
+            break;
+         }
       }
    }
-
-   for (unsigned i = 0; i < block->num_dom_children; ++i)
-      rename_variables_block(block->dom_children[i], state);
 
    return true;
 }
@@ -622,7 +620,7 @@ rename_variables_block(nir_block *block, struct lower_variables_state *state)
  *     fully-direct references we see and store them in the
  *     direct_deref_nodes hash table.
  *
- *  2) Walk over the the list of fully-qualified direct derefs generated in
+ *  2) Walk over the list of fully-qualified direct derefs generated in
  *     the previous pass.  For each deref, we determine if it can ever be
  *     aliased, i.e. if there is an indirect reference anywhere that may
  *     refer to it.  If it cannot be aliased, we mark it for lowering to an
@@ -653,7 +651,10 @@ nir_lower_vars_to_ssa_impl(nir_function_impl *impl)
 
    /* Build the initial deref structures and direct_deref_nodes table */
    state.add_to_direct_deref_nodes = true;
-   nir_foreach_block_call(impl, register_variable_uses_block, &state);
+
+   nir_foreach_block(block, impl) {
+      register_variable_uses_block(block, &state);
+   }
 
    bool progress = false;
 
@@ -693,7 +694,9 @@ nir_lower_vars_to_ssa_impl(nir_function_impl *impl)
     * added load/store instructions are registered.  We need this
     * information for phi node insertion below.
     */
-   nir_foreach_block_call(impl, register_variable_uses_block, &state);
+   nir_foreach_block(block, impl) {
+      register_variable_uses_block(block, &state);
+   }
 
    state.phi_builder = nir_phi_builder_create(state.impl);
 
@@ -721,7 +724,7 @@ nir_lower_vars_to_ssa_impl(nir_function_impl *impl)
       node->pb_value =
          nir_phi_builder_add_value(state.phi_builder,
                                    glsl_get_vector_elements(node->type),
-                                   glsl_get_bit_size(glsl_get_base_type(node->type)),
+                                   glsl_get_bit_size(node->type),
                                    store_blocks);
 
       if (node->deref->var->constant_initializer) {
@@ -733,7 +736,7 @@ nir_lower_vars_to_ssa_impl(nir_function_impl *impl)
       }
    }
 
-   rename_variables_block(nir_start_block(impl), &state);
+   rename_variables(&state);
 
    nir_phi_builder_finish(state.phi_builder);
 
@@ -748,7 +751,7 @@ nir_lower_vars_to_ssa_impl(nir_function_impl *impl)
 void
 nir_lower_vars_to_ssa(nir_shader *shader)
 {
-   nir_foreach_function(shader, function) {
+   nir_foreach_function(function, shader) {
       if (function->impl)
          nir_lower_vars_to_ssa_impl(function->impl);
    }

@@ -46,7 +46,7 @@ r600_create_so_target(struct pipe_context *ctx,
 		return NULL;
 	}
 
-	u_suballocator_alloc(rctx->allocator_so_filled_size, 4,
+	u_suballocator_alloc(rctx->allocator_zeroed_memory, 4, 4,
 			     &t->buf_filled_size_offset,
 			     (struct pipe_resource**)&t->buf_filled_size);
 	if (!t->buf_filled_size) {
@@ -70,7 +70,7 @@ static void r600_so_target_destroy(struct pipe_context *ctx,
 {
 	struct r600_so_target *t = (struct r600_so_target*)target;
 	pipe_resource_reference(&t->b.buffer, NULL);
-	pipe_resource_reference((struct pipe_resource**)&t->buf_filled_size, NULL);
+	r600_resource_reference(&t->buf_filled_size, NULL);
 	FREE(t);
 }
 
@@ -116,7 +116,7 @@ void r600_set_streamout_targets(struct pipe_context *ctx,
 {
 	struct r600_common_context *rctx = (struct r600_common_context *)ctx;
 	unsigned i;
-        unsigned append_bitmask = 0;
+        unsigned enabled_mask = 0, append_bitmask = 0;
 
 	/* Stop streamout. */
 	if (rctx->streamout.num_targets && rctx->streamout.begin_emitted) {
@@ -126,18 +126,19 @@ void r600_set_streamout_targets(struct pipe_context *ctx,
 	/* Set the new targets. */
 	for (i = 0; i < num_targets; i++) {
 		pipe_so_target_reference((struct pipe_stream_output_target**)&rctx->streamout.targets[i], targets[i]);
+		if (!targets[i])
+			continue;
+
 		r600_context_add_resource_size(ctx, targets[i]->buffer);
+		enabled_mask |= 1 << i;
 		if (offsets[i] == ((unsigned)-1))
-			append_bitmask |=  1 << i;
+			append_bitmask |= 1 << i;
 	}
 	for (; i < rctx->streamout.num_targets; i++) {
 		pipe_so_target_reference((struct pipe_stream_output_target**)&rctx->streamout.targets[i], NULL);
 	}
 
-	rctx->streamout.enabled_mask = (num_targets >= 1 && targets[0] ? 1 : 0) |
-				       (num_targets >= 2 && targets[1] ? 2 : 0) |
-				       (num_targets >= 3 && targets[2] ? 4 : 0) |
-				       (num_targets >= 4 && targets[3] ? 8 : 0);
+	rctx->streamout.enabled_mask = enabled_mask;
 
 	rctx->streamout.num_targets = num_targets;
 	rctx->streamout.append_bitmask = append_bitmask;
@@ -217,7 +218,7 @@ static void r600_emit_streamout_begin(struct r600_common_context *rctx, struct r
 			radeon_emit(cs, va >> 8);			/* BUFFER_BASE */
 
 			r600_emit_reloc(rctx, &rctx->gfx, r600_resource(t[i]->b.buffer),
-					RADEON_USAGE_WRITE, RADEON_PRIO_RINGS_STREAMOUT);
+					RADEON_USAGE_WRITE, RADEON_PRIO_SHADER_RW_BUFFER);
 
 			/* R7xx requires this packet after updating BUFFER_BASE.
 			 * Without this, R7xx locks up. */
@@ -227,7 +228,7 @@ static void r600_emit_streamout_begin(struct r600_common_context *rctx, struct r
 				radeon_emit(cs, va >> 8);
 
 				r600_emit_reloc(rctx, &rctx->gfx, r600_resource(t[i]->b.buffer),
-						RADEON_USAGE_WRITE, RADEON_PRIO_RINGS_STREAMOUT);
+						RADEON_USAGE_WRITE, RADEON_PRIO_SHADER_RW_BUFFER);
 			}
 		}
 

@@ -88,18 +88,23 @@ MESA_ENABLE_LLVM := $(if $(filter radeonsi,$(MESA_GPU_DRIVERS)),true,false)
 ifneq ($(strip $(MESA_GPU_DRIVERS)),)
 
 SUBDIRS := \
+	src/gbm \
 	src/loader \
 	src/mapi \
 	src/compiler \
 	src/mesa \
 	src/util \
 	src/egl \
+	src/amd \
+	src/intel \
 	src/mesa/drivers/dri
 
+INC_DIRS := $(call all-named-subdir-makefiles,$(SUBDIRS))
+
 ifeq ($(strip $(MESA_BUILD_GALLIUM)),true)
-SUBDIRS += src/gallium
+INC_DIRS += $(call all-named-subdir-makefiles,src/gallium)
 endif
 
-include $(call all-named-subdir-makefiles,$(SUBDIRS))
+include $(INC_DIRS)
 
 endif

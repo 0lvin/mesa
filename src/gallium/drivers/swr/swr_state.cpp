@@ -21,9 +21,14 @@
  * IN THE SOFTWARE.
  ***************************************************************************/
 
+// llvm redefines DEBUG
+#pragma push_macro("DEBUG")
+#undef DEBUG
+#include "JitManager.h"
+#pragma pop_macro("DEBUG")
+
 #include "common/os.h"
 #include "jit_api.h"
-#include "JitManager.h"
 #include "state_llvm.h"
 
 #include "gallivm/lp_bld_tgsi.h"
@@ -230,7 +235,7 @@ swr_create_sampler_state(struct pipe_context *pipe,
 
 static void
 swr_bind_sampler_states(struct pipe_context *pipe,
-                        unsigned shader,
+                        enum pipe_shader_type shader,
                         unsigned start,
                         unsigned num,
                         void **samplers)
@@ -239,7 +244,7 @@ swr_bind_sampler_states(struct pipe_context *pipe,
    unsigned i;
 
    assert(shader < PIPE_SHADER_TYPES);
-   assert(start + num <= Elements(ctx->samplers[shader]));
+   assert(start + num <= ARRAY_SIZE(ctx->samplers[shader]));
 
    /* set the new samplers */
    ctx->num_samplers[shader] = num;
@@ -277,7 +282,7 @@ swr_create_sampler_view(struct pipe_context *pipe,
 
 static void
 swr_set_sampler_views(struct pipe_context *pipe,
-                      unsigned shader,
+                      enum pipe_shader_type shader,
                       unsigned start,
                       unsigned num,
                       struct pipe_sampler_view **views)
@@ -288,7 +293,7 @@ swr_set_sampler_views(struct pipe_context *pipe,
    assert(num <= PIPE_MAX_SHADER_SAMPLER_VIEWS);
 
    assert(shader < PIPE_SHADER_TYPES);
-   assert(start + num <= Elements(ctx->sampler_views[shader]));
+   assert(start + num <= ARRAY_SIZE(ctx->sampler_views[shader]));
 
    /* set the new sampler views */
    ctx->num_sampler_views[shader] = num;
@@ -409,13 +414,13 @@ static void
 swr_set_constant_buffer(struct pipe_context *pipe,
                         uint shader,
                         uint index,
-                        struct pipe_constant_buffer *cb)
+                        const struct pipe_constant_buffer *cb)
 {
    struct swr_context *ctx = swr_context(pipe);
    struct pipe_resource *constants = cb ? cb->buffer : NULL;
 
    assert(shader < PIPE_SHADER_TYPES);
-   assert(index < Elements(ctx->constants[shader]));
+   assert(index < ARRAY_SIZE(ctx->constants[shader]));
 
    /* note: reference counting */
    util_copy_constant_buffer(&ctx->constants[shader][index], cb);
@@ -570,6 +575,10 @@ swr_set_scissor_states(struct pipe_context *pipe,
    struct swr_context *ctx = swr_context(pipe);
 
    ctx->scissor = *scissor;
+   ctx->swr_scissor.xmin = scissor->minx;
+   ctx->swr_scissor.xmax = scissor->maxx;
+   ctx->swr_scissor.ymin = scissor->miny;
+   ctx->swr_scissor.ymax = scissor->maxy;
    ctx->dirty |= SWR_NEW_SCISSOR;
 }
 
@@ -724,12 +733,61 @@ swr_update_sampler_state(struct swr_context *ctx,
    }
 }
 
+static void
+swr_update_constants(struct swr_context *ctx, enum pipe_shader_type shaderType)
+{
+   swr_draw_context *pDC = &ctx->swrDC;
+
+   const float **constant;
+   uint32_t *num_constants;
+   struct swr_scratch_space *scratch;
+
+   switch (shaderType) {
+   case PIPE_SHADER_VERTEX:
+      constant = pDC->constantVS;
+      num_constants = pDC->num_constantsVS;
+      scratch = &ctx->scratch->vs_constants;
+      break;
+   case PIPE_SHADER_FRAGMENT:
+      constant = pDC->constantFS;
+      num_constants = pDC->num_constantsFS;
+      scratch = &ctx->scratch->fs_constants;
+      break;
+   default:
+      debug_printf("Unsupported shader type constants\n");
+      return;
+   }
+
+   for (UINT i = 0; i < PIPE_MAX_CONSTANT_BUFFERS; i++) {
+      const pipe_constant_buffer *cb = &ctx->constants[shaderType][i];
+      num_constants[i] = cb->buffer_size;
+      if (cb->buffer) {
+         constant[i] =
+            (const float *)(swr_resource_data(cb->buffer) +
+                            cb->buffer_offset);
+      } else {
+         /* Need to copy these constants to scratch space */
+         if (cb->user_buffer && cb->buffer_size) {
+            const void *ptr =
+               ((const uint8_t *)cb->user_buffer + cb->buffer_offset);
+            uint32_t size = AlignUp(cb->buffer_size, 4);
+            ptr = swr_copy_to_scratch_space(ctx, scratch, ptr, size);
+            constant[i] = (const float *)ptr;
+         }
+      }
+   }
+}
+
 void
 swr_update_derived(struct pipe_context *pipe,
                    const struct pipe_draw_info *p_draw_info)
 {
    struct swr_context *ctx = swr_context(pipe);
    struct swr_screen *screen = swr_screen(ctx->pipe.screen);
+
+   /* Update screen->pipe to current pipe context. */
+   if (screen->pipe != pipe)
+      screen->pipe = pipe;
 
    /* Any state that requires dirty flags to be re-triggered sets this mask */
    /* For example, user_buffer vertex and index buffers. */
@@ -804,7 +862,9 @@ swr_update_derived(struct pipe_context *pipe,
    }
 
    /* Raster state */
-   if (ctx->dirty & (SWR_NEW_RASTERIZER | SWR_NEW_FRAMEBUFFER)) {
+   if (ctx->dirty & (SWR_NEW_RASTERIZER |
+                     SWR_NEW_VS | // clipping
+                     SWR_NEW_FRAMEBUFFER)) {
       pipe_rasterizer_state *rasterizer = ctx->rasterizer;
       pipe_framebuffer_state *fb = &ctx->framebuffer;
 
@@ -831,7 +891,7 @@ swr_update_derived(struct pipe_context *pipe,
       rastState->msaaRastEnable = false;
       rastState->rastMode = SWR_MSAA_RASTMODE_OFF_PIXEL;
       rastState->sampleCount = SWR_MULTISAMPLE_1X;
-      rastState->bForcedSampleCount = false;
+      rastState->forcedSampleCount = false;
 
       bool do_offset = false;
       switch (rasterizer->fill_front) {
@@ -861,15 +921,20 @@ swr_update_derived(struct pipe_context *pipe,
 
       rastState->depthClipEnable = rasterizer->depth_clip;
 
+      rastState->clipDistanceMask =
+         ctx->vs->info.base.num_written_clipdistance ?
+         ctx->vs->info.base.clipdist_writemask & rasterizer->clip_plane_enable :
+         rasterizer->clip_plane_enable;
+
+      rastState->cullDistanceMask =
+         ctx->vs->info.base.culldist_writemask << ctx->vs->info.base.num_written_clipdistance;
+
       SwrSetRastState(ctx->swrContext, rastState);
    }
 
    /* Scissor */
    if (ctx->dirty & SWR_NEW_SCISSOR) {
-      pipe_scissor_state *scissor = &ctx->scissor;
-      BBOX bbox(scissor->miny, scissor->maxy,
-                scissor->minx, scissor->maxx);
-      SwrSetScissorRects(ctx->swrContext, 1, &bbox);
+      SwrSetScissorRects(ctx->swrContext, 1, &ctx->swr_scissor);
    }
 
    /* Viewport */
@@ -880,7 +945,7 @@ swr_update_derived(struct pipe_context *pipe,
       pipe_rasterizer_state *rasterizer = ctx->rasterizer;
 
       SWR_VIEWPORT *vp = &ctx->derived.vp;
-      SWR_VIEWPORT_MATRIX *vpm = &ctx->derived.vpm;
+      SWR_VIEWPORT_MATRICES *vpm = &ctx->derived.vpm;
 
       vp->x = state->translate[0] - state->scale[0];
       vp->width = state->translate[0] + state->scale[0];
@@ -894,12 +959,12 @@ swr_update_derived(struct pipe_context *pipe,
          vp->maxZ = state->translate[2] + state->scale[2];
       }
 
-      vpm->m00 = state->scale[0];
-      vpm->m11 = state->scale[1];
-      vpm->m22 = state->scale[2];
-      vpm->m30 = state->translate[0];
-      vpm->m31 = state->translate[1];
-      vpm->m32 = state->translate[2];
+      vpm->m00[0] = state->scale[0];
+      vpm->m11[0] = state->scale[1];
+      vpm->m22[0] = state->scale[2];
+      vpm->m30[0] = state->translate[0];
+      vpm->m31[0] = state->translate[1];
+      vpm->m32[0] = state->translate[2];
 
       /* Now that the matrix is calculated, clip the view coords to screen
        * size.  OpenGL allows for -ve x,y in the viewport. */
@@ -1022,6 +1087,7 @@ swr_update_derived(struct pipe_context *pipe,
 
    /* VertexShader */
    if (ctx->dirty & (SWR_NEW_VS |
+                     SWR_NEW_RASTERIZER | // for clip planes
                      SWR_NEW_SAMPLER |
                      SWR_NEW_SAMPLER_VIEW |
                      SWR_NEW_FRAMEBUFFER)) {
@@ -1126,54 +1192,12 @@ swr_update_derived(struct pipe_context *pipe,
 
    /* VertexShader Constants */
    if (ctx->dirty & SWR_NEW_VSCONSTANTS) {
-      swr_draw_context *pDC = &ctx->swrDC;
-
-      for (UINT i = 0; i < PIPE_MAX_CONSTANT_BUFFERS; i++) {
-         const pipe_constant_buffer *cb =
-            &ctx->constants[PIPE_SHADER_VERTEX][i];
-         pDC->num_constantsVS[i] = cb->buffer_size;
-         if (cb->buffer)
-            pDC->constantVS[i] =
-               (const float *)(swr_resource_data(cb->buffer) +
-                               cb->buffer_offset);
-         else {
-            /* Need to copy these constants to scratch space */
-            if (cb->user_buffer && cb->buffer_size) {
-               const void *ptr =
-                  ((const uint8_t *)cb->user_buffer + cb->buffer_offset);
-               uint32_t size = AlignUp(cb->buffer_size, 4);
-               ptr = swr_copy_to_scratch_space(
-                  ctx, &ctx->scratch->vs_constants, ptr, size);
-               pDC->constantVS[i] = (const float *)ptr;
-            }
-         }
-      }
+      swr_update_constants(ctx, PIPE_SHADER_VERTEX);
    }
 
    /* FragmentShader Constants */
    if (ctx->dirty & SWR_NEW_FSCONSTANTS) {
-      swr_draw_context *pDC = &ctx->swrDC;
-
-      for (UINT i = 0; i < PIPE_MAX_CONSTANT_BUFFERS; i++) {
-         const pipe_constant_buffer *cb =
-            &ctx->constants[PIPE_SHADER_FRAGMENT][i];
-         pDC->num_constantsFS[i] = cb->buffer_size;
-         if (cb->buffer)
-            pDC->constantFS[i] =
-               (const float *)(swr_resource_data(cb->buffer) +
-                               cb->buffer_offset);
-         else {
-            /* Need to copy these constants to scratch space */
-            if (cb->user_buffer && cb->buffer_size) {
-               const void *ptr =
-                  ((const uint8_t *)cb->user_buffer + cb->buffer_offset);
-               uint32_t size = AlignUp(cb->buffer_size, 4);
-               ptr = swr_copy_to_scratch_space(
-                  ctx, &ctx->scratch->fs_constants, ptr, size);
-               pDC->constantFS[i] = (const float *)ptr;
-            }
-         }
-      }
+      swr_update_constants(ctx, PIPE_SHADER_FRAGMENT);
    }
 
    /* Depth/stencil state */
@@ -1294,6 +1318,8 @@ swr_update_derived(struct pipe_context *pipe,
                swr_convert_depth_func(ctx->depth_stencil->alpha.func);
             compileState.alphaTestFormat = ALPHA_TEST_FLOAT32; // xxx
 
+            compileState.Canonicalize();
+            
             PFN_BLEND_JIT_FUNC func = NULL;
             auto search = ctx->blendJIT->find(compileState);
             if (search != ctx->blendJIT->end()) {
@@ -1338,28 +1364,36 @@ swr_update_derived(struct pipe_context *pipe,
       }
    }
 
-   uint32_t linkage = ctx->vs->linkageMask;
-   if (ctx->rasterizer->sprite_coord_enable)
-      linkage |= (1 << ctx->vs->info.base.num_outputs);
-
-   SwrSetLinkage(ctx->swrContext, linkage, NULL);
-
-   // set up frontend state
-   SWR_FRONTEND_STATE feState = {0};
-   SwrSetFrontendState(ctx->swrContext, &feState);
+   if (ctx->dirty & SWR_NEW_CLIP) {
+      // shader exporting clip distances overrides all user clip planes
+      if (ctx->rasterizer->clip_plane_enable &&
+          !ctx->vs->info.base.num_written_clipdistance)
+      {
+         swr_draw_context *pDC = &ctx->swrDC;
+         memcpy(pDC->userClipPlanes,
+                ctx->clip.ucp,
+                sizeof(pDC->userClipPlanes));
+      }
+   }
 
    // set up backend state
    SWR_BACKEND_STATE backendState = {0};
-   backendState.numAttributes = 1;
-   backendState.numComponents[0] = 4;
-   backendState.constantInterpolationMask = ctx->fs->constantMask;
+   backendState.numAttributes =
+      ctx->vs->info.base.num_outputs - 1 +
+      (ctx->rasterizer->sprite_coord_enable ? 1 : 0);
+   for (unsigned i = 0; i < backendState.numAttributes; i++)
+      backendState.numComponents[i] = 4;
+   backendState.constantInterpolationMask =
+      ctx->rasterizer->flatshade ?
+      ctx->fs->flatConstantMask :
+      ctx->fs->constantMask;
    backendState.pointSpriteTexCoordMask = ctx->fs->pointSpriteMask;
 
    SwrSetBackendState(ctx->swrContext, &backendState);
 
    /* Ensure that any in-progress attachment change StoreTiles finish */
    if (swr_is_fence_pending(screen->flush_fence))
-      swr_fence_finish(pipe->screen, screen->flush_fence, 0);
+      swr_fence_finish(pipe->screen, NULL, screen->flush_fence, 0);
 
    /* Finally, update the in-use status of all resources involved in draw */
    swr_update_resource_status(pipe, p_draw_info);

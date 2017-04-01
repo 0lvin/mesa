@@ -56,7 +56,7 @@ softpipe_flush( struct pipe_context *pipe,
    if (flags & SP_FLUSH_TEXTURE_CACHE) {
       unsigned sh;
 
-      for (sh = 0; sh < Elements(softpipe->tex_cache); sh++) {
+      for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
          for (i = 0; i < softpipe->num_sampler_views[sh]; i++) {
             sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
          }
@@ -153,7 +153,7 @@ softpipe_flush_resource(struct pipe_context *pipe,
              * This is for illustrative purposes only, as softpipe does not
              * have fences.
              */
-            pipe->screen->fence_finish(pipe->screen, fence,
+            pipe->screen->fence_finish(pipe->screen, NULL, fence,
                                        PIPE_TIMEOUT_INFINITE);
             pipe->screen->fence_reference(pipe->screen, &fence, NULL);
          }
@@ -174,7 +174,7 @@ void softpipe_texture_barrier(struct pipe_context *pipe)
    struct softpipe_context *softpipe = softpipe_context(pipe);
    uint i, sh;
 
-   for (sh = 0; sh < Elements(softpipe->tex_cache); sh++) {
+   for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
       for (i = 0; i < softpipe->num_sampler_views[sh]; i++) {
          sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
       }

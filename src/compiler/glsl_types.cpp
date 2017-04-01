@@ -55,6 +55,13 @@ glsl_type::glsl_type(GLenum gl_type,
    vector_elements(vector_elements), matrix_columns(matrix_columns),
    length(0)
 {
+   /* Values of these types must fit in the two bits of
+    * glsl_type::sampled_type.
+    */
+   STATIC_ASSERT((unsigned(GLSL_TYPE_UINT)  & 3) == unsigned(GLSL_TYPE_UINT));
+   STATIC_ASSERT((unsigned(GLSL_TYPE_INT)   & 3) == unsigned(GLSL_TYPE_INT));
+   STATIC_ASSERT((unsigned(GLSL_TYPE_FLOAT) & 3) == unsigned(GLSL_TYPE_FLOAT));
+
    mtx_lock(&glsl_type::mutex);
 
    init_ralloc_type_ctx();
@@ -667,6 +674,8 @@ glsl_type::get_sampler_instance(enum glsl_sampler_dim dim,
             return error_type;
          else
             return samplerExternalOES_type;
+      case GLSL_SAMPLER_DIM_SUBPASS:
+         return error_type;
       }
    case GLSL_TYPE_INT:
       if (shadow)
@@ -693,6 +702,8 @@ glsl_type::get_sampler_instance(enum glsl_sampler_dim dim,
       case GLSL_SAMPLER_DIM_MS:
          return (array ? isampler2DMSArray_type : isampler2DMS_type);
       case GLSL_SAMPLER_DIM_EXTERNAL:
+         return error_type;
+      case GLSL_SAMPLER_DIM_SUBPASS:
          return error_type;
       }
    case GLSL_TYPE_UINT:
@@ -721,6 +732,8 @@ glsl_type::get_sampler_instance(enum glsl_sampler_dim dim,
          return (array ? usampler2DMSArray_type : usampler2DMS_type);
       case GLSL_SAMPLER_DIM_EXTERNAL:
          return error_type;
+      case GLSL_SAMPLER_DIM_SUBPASS:
+         return error_type;
       }
    default:
       return error_type;
@@ -733,6 +746,8 @@ const glsl_type *
 glsl_type::get_image_instance(enum glsl_sampler_dim dim,
                               bool array, glsl_base_type type)
 {
+   if (dim == GLSL_SAMPLER_DIM_SUBPASS)
+      return subpassInput_type;
    switch (type) {
    case GLSL_TYPE_FLOAT:
       switch (dim) {
@@ -757,6 +772,7 @@ glsl_type::get_image_instance(enum glsl_sampler_dim dim,
       case GLSL_SAMPLER_DIM_MS:
          return (array ? image2DMSArray_type : image2DMS_type);
       case GLSL_SAMPLER_DIM_EXTERNAL:
+      case GLSL_SAMPLER_DIM_SUBPASS:
          return error_type;
       }
    case GLSL_TYPE_INT:
@@ -782,6 +798,7 @@ glsl_type::get_image_instance(enum glsl_sampler_dim dim,
       case GLSL_SAMPLER_DIM_MS:
          return (array ? iimage2DMSArray_type : iimage2DMS_type);
       case GLSL_SAMPLER_DIM_EXTERNAL:
+      case GLSL_SAMPLER_DIM_SUBPASS:
          return error_type;
       }
    case GLSL_TYPE_UINT:
@@ -807,6 +824,7 @@ glsl_type::get_image_instance(enum glsl_sampler_dim dim,
       case GLSL_SAMPLER_DIM_MS:
          return (array ? uimage2DMSArray_type : uimage2DMS_type);
       case GLSL_SAMPLER_DIM_EXTERNAL:
+      case GLSL_SAMPLER_DIM_SUBPASS:
          return error_type;
       }
    default:
@@ -856,7 +874,7 @@ glsl_type::get_array_instance(const glsl_type *base, unsigned array_size)
 
 
 bool
-glsl_type::record_compare(const glsl_type *b) const
+glsl_type::record_compare(const glsl_type *b, bool match_locations) const
 {
    if (this->length != b->length)
       return false;
@@ -887,7 +905,7 @@ glsl_type::record_compare(const glsl_type *b) const
       if (this->fields.structure[i].matrix_layout
          != b->fields.structure[i].matrix_layout)
         return false;
-      if (this->fields.structure[i].location
+      if (match_locations && this->fields.structure[i].location
           != b->fields.structure[i].location)
          return false;
       if (this->fields.structure[i].offset
@@ -1079,7 +1097,7 @@ function_key_compare(const void *a, const void *b)
    const glsl_type *const key2 = (glsl_type *) b;
 
    if (key1->length != key2->length)
-      return 1;
+      return false;
 
    return memcmp(key1->fields.parameters, key2->fields.parameters,
                  (key1->length + 1) * sizeof(*key1->fields.parameters)) == 0;
@@ -1090,20 +1108,8 @@ static uint32_t
 function_key_hash(const void *a)
 {
    const glsl_type *const key = (glsl_type *) a;
-   char hash_key[128];
-   unsigned size = 0;
-
-   size = snprintf(hash_key, sizeof(hash_key), "%08x", key->length);
-
-   for (unsigned i = 0; i < key->length; i++) {
-      if (size >= sizeof(hash_key))
-	 break;
-
-      size += snprintf(& hash_key[size], sizeof(hash_key) - size,
-		       "%p", (void *) key->fields.structure[i].type);
-   }
-
-   return _mesa_hash_string(hash_key);
+   return _mesa_hash_data(key->fields.parameters,
+                          (key->length + 1) * sizeof(*key->fields.parameters));
 }
 
 const glsl_type *
@@ -1389,11 +1395,11 @@ glsl_type::can_implicitly_convert_to(const glsl_type *desired,
    if (this == desired)
       return true;
 
-   /* ESSL does not allow implicit conversions. If there is no state, we're
-    * doing intra-stage function linking where these checks have already been
-    * done.
+   /* GLSL 1.10 and ESSL do not allow implicit conversions. If there is no
+    * state, we're doing intra-stage function linking where these checks have
+    * already been done.
     */
-   if (state && state->es_shader)
+   if (state && (state->es_shader || !state->is_version(120, 0)))
       return false;
 
    /* There is no conversion among matrix types. */
@@ -1408,11 +1414,14 @@ glsl_type::can_implicitly_convert_to(const glsl_type *desired,
    if (desired->is_float() && this->is_integer())
       return true;
 
-   /* With GLSL 4.0 / ARB_gpu_shader5, int can be converted to uint.
-    * Note that state may be NULL here, when resolving function calls in the
-    * linker. By this time, all the state-dependent checks have already
-    * happened though, so allow anything that's allowed in any shader version. */
-   if ((!state || state->is_version(400, 0) || state->ARB_gpu_shader5_enable) &&
+   /* With GLSL 4.0, ARB_gpu_shader5, or MESA_shader_integer_functions, int
+    * can be converted to uint.  Note that state may be NULL here, when
+    * resolving function calls in the linker. By this time, all the
+    * state-dependent checks have already happened though, so allow anything
+    * that's allowed in any shader version.
+    */
+   if ((!state || state->is_version(400, 0) || state->ARB_gpu_shader5_enable ||
+        state->MESA_shader_integer_functions_enable) &&
          desired->base_type == GLSL_TYPE_UINT && this->base_type == GLSL_TYPE_INT)
       return true;
 
@@ -1434,7 +1443,7 @@ glsl_type::can_implicitly_convert_to(const glsl_type *desired,
 unsigned
 glsl_type::std140_base_alignment(bool row_major) const
 {
-   unsigned N = is_double() ? 8 : 4;
+   unsigned N = is_64bit() ? 8 : 4;
 
    /* (1) If the member is a scalar consuming <N> basic machine units, the
     *     base alignment is <N>.
@@ -1552,7 +1561,7 @@ glsl_type::std140_base_alignment(bool row_major) const
 unsigned
 glsl_type::std140_size(bool row_major) const
 {
-   unsigned N = is_double() ? 8 : 4;
+   unsigned N = is_64bit() ? 8 : 4;
 
    /* (1) If the member is a scalar consuming <N> basic machine units, the
     *     base alignment is <N>.
@@ -1689,7 +1698,7 @@ unsigned
 glsl_type::std430_base_alignment(bool row_major) const
 {
 
-   unsigned N = is_double() ? 8 : 4;
+   unsigned N = is_64bit() ? 8 : 4;
 
    /* (1) If the member is a scalar consuming <N> basic machine units, the
     *     base alignment is <N>.
@@ -1798,7 +1807,7 @@ glsl_type::std430_base_alignment(bool row_major) const
 unsigned
 glsl_type::std430_array_stride(bool row_major) const
 {
-   unsigned N = is_double() ? 8 : 4;
+   unsigned N = is_64bit() ? 8 : 4;
 
    /* Notice that the array stride of a vec3 is not 3 * N but 4 * N.
     * See OpenGL 4.30 spec, section 7.6.2.2 "Standard Uniform Block Layout"
@@ -1816,7 +1825,7 @@ glsl_type::std430_array_stride(bool row_major) const
 unsigned
 glsl_type::std430_size(bool row_major) const
 {
-   unsigned N = is_double() ? 8 : 4;
+   unsigned N = is_64bit() ? 8 : 4;
 
    /* OpenGL 4.30 spec, section 7.6.2.2 "Standard Uniform Block Layout":
     *
@@ -1977,6 +1986,7 @@ glsl_type::coordinate_components() const
    case GLSL_SAMPLER_DIM_RECT:
    case GLSL_SAMPLER_DIM_MS:
    case GLSL_SAMPLER_DIM_EXTERNAL:
+   case GLSL_SAMPLER_DIM_SUBPASS:
       size = 2;
       break;
    case GLSL_SAMPLER_DIM_3D:

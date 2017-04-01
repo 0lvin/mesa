@@ -69,11 +69,6 @@ nve4_screen_compute_setup(struct nvc0_screen *screen,
       return ret;
    }
 
-   ret = nouveau_bo_new(dev, NV_VRAM_DOMAIN(&screen->base), 0, 1 << 12, NULL,
-                        &screen->parm);
-   if (ret)
-      return ret;
-
    BEGIN_NVC0(push, SUBC_CP(NV01_SUBCHAN_OBJECT), 1);
    PUSH_DATA (push, screen->compute->oclass);
 
@@ -193,6 +188,69 @@ nve4_screen_compute_setup(struct nvc0_screen *screen,
 }
 
 static void
+gm107_compute_validate_surfaces(struct nvc0_context *nvc0,
+                                struct pipe_image_view *view, int slot)
+{
+   struct nv04_resource *res = nv04_resource(view->resource);
+   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
+   struct nvc0_screen *screen = nvc0->screen;
+   struct nouveau_bo *txc = nvc0->screen->txc;
+   struct nv50_tic_entry *tic;
+   uint64_t address;
+   const int s = 5;
+
+   tic = nv50_tic_entry(nvc0->images_tic[s][slot]);
+
+   res = nv04_resource(tic->pipe.texture);
+   nvc0_update_tic(nvc0, tic, res);
+
+   if (tic->id < 0) {
+      tic->id = nvc0_screen_tic_alloc(nvc0->screen, tic);
+
+      /* upload the texture view */
+      PUSH_SPACE(push, 16);
+      BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
+      PUSH_DATAh(push, txc->offset + (tic->id * 32));
+      PUSH_DATA (push, txc->offset + (tic->id * 32));
+      BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
+      PUSH_DATA (push, 32);
+      PUSH_DATA (push, 1);
+      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 9);
+      PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
+      PUSH_DATAp(push, &tic->tic[0], 8);
+
+      BEGIN_NIC0(push, NVE4_CP(TIC_FLUSH), 1);
+      PUSH_DATA (push, (tic->id << 4) | 1);
+   } else
+   if (res->status & NOUVEAU_BUFFER_STATUS_GPU_WRITING) {
+      BEGIN_NIC0(push, NVE4_CP(TEX_CACHE_CTL), 1);
+      PUSH_DATA (push, (tic->id << 4) | 1);
+   }
+   nvc0->screen->tic.lock[tic->id / 32] |= 1 << (tic->id % 32);
+
+   res->status &= ~NOUVEAU_BUFFER_STATUS_GPU_WRITING;
+   res->status |=  NOUVEAU_BUFFER_STATUS_GPU_READING;
+
+   BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RD);
+
+   address = screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s);
+
+   /* upload the texture handle */
+   BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
+   PUSH_DATAh(push, address + NVC0_CB_AUX_TEX_INFO(slot + 32));
+   PUSH_DATA (push, address + NVC0_CB_AUX_TEX_INFO(slot + 32));
+   BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
+   PUSH_DATA (push, 4);
+   PUSH_DATA (push, 0x1);
+   BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 2);
+   PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
+   PUSH_DATA (push, tic->id);
+
+   BEGIN_NVC0(push, NVE4_CP(FLUSH), 1);
+   PUSH_DATA (push, NVE4_COMPUTE_FLUSH_CB);
+}
+
+static void
 nve4_compute_validate_surfaces(struct nvc0_context *nvc0)
 {
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
@@ -205,98 +263,37 @@ nve4_compute_validate_surfaces(struct nvc0_context *nvc0)
 
    address = nvc0->screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s);
 
-   BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
-   PUSH_DATAh(push, address + NVC0_CB_AUX_SU_INFO(0));
-   PUSH_DATA (push, address + NVC0_CB_AUX_SU_INFO(0));
-   BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
-   PUSH_DATA (push, 16 * NVC0_MAX_IMAGES * 4);
-   PUSH_DATA (push, 0x1);
-   BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 16 * NVC0_MAX_IMAGES);
-   PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
-
    for (i = 0; i < NVC0_MAX_IMAGES; ++i) {
       struct pipe_image_view *view = &nvc0->images[s][i];
+
+      BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
+      PUSH_DATAh(push, address + NVC0_CB_AUX_SU_INFO(i));
+      PUSH_DATA (push, address + NVC0_CB_AUX_SU_INFO(i));
+      BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
+      PUSH_DATA (push, 16 * 4);
+      PUSH_DATA (push, 0x1);
+      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 16);
+      PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
+
       if (view->resource) {
          struct nv04_resource *res = nv04_resource(view->resource);
 
+         if (res->base.target == PIPE_BUFFER) {
+            if (view->access & PIPE_IMAGE_ACCESS_WRITE)
+               nvc0_mark_image_range_valid(view);
+         }
+
          nve4_set_surface_info(push, view, nvc0);
          BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RDWR);
+
+         if (nvc0->screen->base.class_3d >= GM107_3D_CLASS)
+            gm107_compute_validate_surfaces(nvc0, view, i);
       } else {
          for (j = 0; j < 16; j++)
             PUSH_DATA(push, 0);
       }
    }
 }
-
-/* Will be removed once images are completely done. */
-#if 0
-static void
-nve4_compute_validate_surfaces(struct nvc0_context *nvc0)
-{
-   struct nvc0_screen *screen = nvc0->screen;
-   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
-   struct nv50_surface *sf;
-   struct nv04_resource *res;
-   uint32_t mask;
-   unsigned i;
-   const unsigned t = 1;
-   uint64_t address;
-
-   address = screen->uniform_bo->offset + NVC0_CB_AUX_INFO(5);
-
-   mask = nvc0->surfaces_dirty[t];
-   while (mask) {
-      i = ffs(mask) - 1;
-      mask &= ~(1 << i);
-
-      /*
-       * NVE4's surface load/store instructions receive all the information
-       * directly instead of via binding points, so we have to supply them.
-       */
-      BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
-      PUSH_DATAh(push, address + NVC0_CB_AUX_BUF_INFO(i));
-      PUSH_DATA (push, address + NVC0_CB_AUX_BUF_INFO(i));
-      BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
-      PUSH_DATA (push, 64);
-      PUSH_DATA (push, 1);
-      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 17);
-      PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
-
-      nve4_set_surface_info(push, nvc0->surfaces[t][i], screen);
-
-      sf = nv50_surface(nvc0->surfaces[t][i]);
-      if (sf) {
-         res = nv04_resource(sf->base.texture);
-
-         if (sf->base.writable)
-            BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RDWR);
-         else
-            BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RD);
-      }
-   }
-   if (nvc0->surfaces_dirty[t]) {
-      BEGIN_NVC0(push, NVE4_CP(FLUSH), 1);
-      PUSH_DATA (push, NVE4_COMPUTE_FLUSH_CB);
-   }
-
-   /* re-reference non-dirty surfaces */
-   mask = nvc0->surfaces_valid[t] & ~nvc0->surfaces_dirty[t];
-   while (mask) {
-      i = ffs(mask) - 1;
-      mask &= ~(1 << i);
-
-      sf = nv50_surface(nvc0->surfaces[t][i]);
-      res = nv04_resource(sf->base.texture);
-
-      if (sf->base.writable)
-         BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RDWR);
-      else
-         BCTX_REFN(nvc0->bufctx_cp, CP_SUF, res, RD);
-   }
-
-   nvc0->surfaces_dirty[t] = 0;
-}
-#endif
 
 /* Thankfully, textures with samplers follow the normal rules. */
 static void
@@ -307,7 +304,13 @@ nve4_compute_validate_samplers(struct nvc0_context *nvc0)
       BEGIN_NVC0(nvc0->base.pushbuf, NVE4_CP(TSC_FLUSH), 1);
       PUSH_DATA (nvc0->base.pushbuf, 0);
    }
+
+   /* Invalidate all 3D samplers because they are aliased. */
+   for (int s = 0; s < 5; s++)
+      nvc0->samplers_dirty[s] = ~0;
+   nvc0->dirty_3d |= NVC0_NEW_3D_SAMPLERS;
 }
+
 /* (Code duplicated at bottom for various non-convincing reasons.
  *  E.g. we might want to use the COMPUTE subchannel to upload TIC/TSC
  *  entries to avoid a subchannel switch.
@@ -439,6 +442,10 @@ nve4_compute_validate_buffers(struct nvc0_context *nvc0)
          PUSH_DATA (push, nvc0->buffers[s][i].buffer_size);
          PUSH_DATA (push, 0);
          BCTX_REFN(nvc0->bufctx_cp, CP_BUF, res, RDWR);
+         util_range_add(&res->valid_buffer_range,
+                        nvc0->buffers[s][i].buffer_offset,
+                        nvc0->buffers[s][i].buffer_offset +
+                        nvc0->buffers[s][i].buffer_size);
       } else {
          PUSH_DATA (push, 0);
          PUSH_DATA (push, 0);
@@ -477,7 +484,6 @@ nve4_state_validate_cp(struct nvc0_context *nvc0, uint32_t mask)
 
 static void
 nve4_compute_upload_input(struct nvc0_context *nvc0,
-                          struct nve4_cp_launch_desc *desc,
                           const struct pipe_grid_info *info)
 {
    struct nvc0_screen *screen = nvc0->screen;
@@ -489,25 +495,20 @@ nve4_compute_upload_input(struct nvc0_context *nvc0,
 
    if (cp->parm_size) {
       BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
-      PUSH_DATAh(push, screen->parm->offset);
-      PUSH_DATA (push, screen->parm->offset);
+      PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_USR_INFO(5));
+      PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_USR_INFO(5));
       BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
       PUSH_DATA (push, cp->parm_size);
       PUSH_DATA (push, 0x1);
       BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + (cp->parm_size / 4));
       PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
       PUSH_DATAp(push, info->input, cp->parm_size / 4);
-
-      /* Bind user parameters coming from clover. */
-      /* TODO: This should be harmonized with uniform_bo. */
-      assert(!(desc->cb_mask & (1 << 0)));
-      nve4_cp_launch_desc_set_cb(desc, 0, screen->parm, 0, 1 << 12);
    }
    BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
-   PUSH_DATAh(push, address + NVC0_CB_AUX_GRID_INFO);
-   PUSH_DATA (push, address + NVC0_CB_AUX_GRID_INFO);
+   PUSH_DATAh(push, address + NVC0_CB_AUX_GRID_INFO(0));
+   PUSH_DATA (push, address + NVC0_CB_AUX_GRID_INFO(0));
    BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
-   PUSH_DATA (push, 7 * 4);
+   PUSH_DATA (push, 8 * 4);
    PUSH_DATA (push, 0x1);
 
    if (unlikely(info->indirect)) {
@@ -517,18 +518,19 @@ nve4_compute_upload_input(struct nvc0_context *nvc0,
       nouveau_pushbuf_space(push, 16, 0, 1);
       PUSH_REFN(push, res->bo, NOUVEAU_BO_RD | res->domain);
 
-      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 7);
+      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 8);
       PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
       PUSH_DATAp(push, info->block, 3);
       nouveau_pushbuf_data(push, res->bo, offset,
                            NVC0_IB_ENTRY_1_NO_PREFETCH | 3 * 4);
    } else {
-      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 7);
+      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + 8);
       PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
       PUSH_DATAp(push, info->block, 3);
       PUSH_DATAp(push, info->grid, 3);
    }
    PUSH_DATA (push, 0);
+   PUSH_DATA (push, info->work_dim);
 
    BEGIN_NVC0(push, NVE4_CP(FLUSH), 1);
    PUSH_DATA (push, NVE4_COMPUTE_FLUSH_CB);
@@ -564,7 +566,7 @@ nve4_compute_setup_launch_desc(struct nvc0_context *nvc0,
    desc->blockdim_z = info->block[2];
 
    desc->shared_size = align(cp->cp.smem_size, 0x100);
-   desc->local_size_p = align(cp->cp.lmem_size, 0x10);
+   desc->local_size_p = (cp->hdr[1] & 0xfffff0) + align(cp->cp.lmem_size, 0x10);
    desc->local_size_n = 0;
    desc->cstack_size = 0x800;
    desc->cache_split = nve4_compute_derive_cache_split(nvc0, cp->cp.smem_size);
@@ -572,10 +574,10 @@ nve4_compute_setup_launch_desc(struct nvc0_context *nvc0,
    desc->gpr_alloc = cp->num_gprs;
    desc->bar_alloc = cp->num_barriers;
 
-   // Only bind OpenGL uniforms and the driver constant buffer through the
+   // Only bind user uniforms and the driver constant buffer through the
    // launch descriptor because UBOs are sticked to the driver cb to avoid the
    // limitation of 8 CBs.
-   if (nvc0->constbuf[5][0].user) {
+   if (nvc0->constbuf[5][0].user || cp->parm_size) {
       nve4_cp_launch_desc_set_cb(desc, 0, screen->uniform_bo,
                                  NVC0_CB_USR_INFO(5), 1 << 16);
    }
@@ -622,7 +624,7 @@ nve4_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
 
    nve4_compute_setup_launch_desc(nvc0, desc, info);
 
-   nve4_compute_upload_input(nvc0, desc, info);
+   nve4_compute_upload_input(nvc0, info);
 
 #ifdef DEBUG
    if (debug_get_num_option("NV50_PROG_DEBUG", 0))
@@ -713,6 +715,7 @@ nve4_compute_validate_textures(struct nvc0_context *nvc0)
          continue;
       }
       res = nv04_resource(tic->pipe.texture);
+      nvc0_update_tic(nvc0, tic, res);
 
       if (tic->id < 0) {
          tic->id = nvc0_screen_tic_alloc(nvc0->screen, tic);
@@ -743,8 +746,10 @@ nve4_compute_validate_textures(struct nvc0_context *nvc0)
       if (dirty)
          BCTX_REFN(nvc0->bufctx_cp, CP_TEX(i), res, RD);
    }
-   for (; i < nvc0->state.num_textures[s]; ++i)
+   for (; i < nvc0->state.num_textures[s]; ++i) {
       nvc0->tex_handles[s][i] |= NVE4_TIC_ENTRY_INVALID;
+      nvc0->textures_dirty[s] |= 1 << i;
+   }
 
    if (n[0]) {
       BEGIN_NIC0(push, NVE4_CP(TIC_FLUSH), n[0]);
@@ -756,6 +761,14 @@ nve4_compute_validate_textures(struct nvc0_context *nvc0)
    }
 
    nvc0->state.num_textures[s] = nvc0->num_textures[s];
+
+   /* Invalidate all 3D textures because they are aliased. */
+   for (int s = 0; s < 5; s++) {
+      for (int i = 0; i < nvc0->num_textures[s]; i++)
+         nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEX(s, i));
+      nvc0->textures_dirty[s] = ~0;
+   }
+   nvc0->dirty_3d |= NVC0_NEW_3D_TEXTURES;
 }
 
 

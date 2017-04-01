@@ -46,9 +46,6 @@
 #include "evergreen_compute_internal.h"
 #include "compute_memory_pool.h"
 #include "sb/sb_public.h"
-#ifdef HAVE_OPENCL
-#include "radeon/radeon_llvm_util.h"
-#endif
 #include "radeon/radeon_elf_util.h"
 #include <inttypes.h>
 
@@ -242,7 +239,7 @@ static void r600_destroy_shader(struct r600_bytecode *bc)
 }
 
 static void *evergreen_create_compute_state(struct pipe_context *ctx,
-					    const const struct pipe_compute_state *cso)
+					    const struct pipe_compute_state *cso)
 {
 	struct r600_context *rctx = (struct r600_context *)ctx;
 	struct r600_pipe_compute *shader = CALLOC_STRUCT(r600_pipe_compute);
@@ -259,9 +256,11 @@ static void *evergreen_create_compute_state(struct pipe_context *ctx,
 	radeon_elf_read(code, header->num_bytes, &shader->binary);
 	r600_create_shader(&shader->bc, &shader->binary, &use_kill);
 
+	/* Upload code + ROdata */
 	shader->code_bo = r600_compute_buffer_alloc_vram(rctx->screen,
 							shader->bc.ndw * 4);
 	p = r600_buffer_map_sync_with_rings(&rctx->b, shader->code_bo, PIPE_TRANSFER_WRITE);
+	//TODO: use util_memcpy_cpu_to_le32 ?
 	memcpy(p, shader->bc.bytecode, shader->bc.ndw * 4);
 	rctx->b.ws->buffer_unmap(shader->code_bo->buf);
 #endif
@@ -370,7 +369,11 @@ static void evergreen_compute_upload_input(struct pipe_context *ctx,
 
 	ctx->transfer_unmap(ctx, transfer);
 
-	/* ID=0 is reserved for the parameters */
+	/* ID=0 and ID=3 are reserved for the parameters.
+	 * LLVM will preferably use ID=0, but it does not work for dynamic
+	 * indices. */
+	evergreen_cs_set_vertex_buffer(rctx, 3, 0,
+			(struct pipe_resource*)shader->kernel_param);
 	evergreen_cs_set_constant_buffer(rctx, 0, 0, input_size,
 			(struct pipe_resource*)shader->kernel_param);
 }
@@ -450,7 +453,7 @@ static void compute_emit_cs(struct r600_context *rctx,
 	unsigned i;
 
 	/* make sure that the gfx ring is only one active */
-	if (rctx->b.dma.cs && rctx->b.dma.cs->cdw) {
+	if (radeon_emitted(rctx->b.dma.cs, 0)) {
 		rctx->b.dma.flush(rctx, RADEON_FLUSH_ASYNC, NULL);
 	}
 
@@ -581,7 +584,7 @@ void evergreen_emit_cs_shader(struct r600_context *rctx,
 	radeon_emit(cs, PKT3C(PKT3_NOP, 0, 0));
 	radeon_emit(cs, radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx,
 					      code_bo, RADEON_USAGE_READ,
-					      RADEON_PRIO_USER_SHADER));
+					      RADEON_PRIO_SHADER_BINARY));
 }
 
 static void evergreen_launch_grid(struct pipe_context *ctx,
@@ -616,9 +619,9 @@ static void evergreen_set_compute_resources(struct pipe_context *ctx,
 			start, count);
 
 	for (unsigned i = 0; i < count; i++) {
-		/* The First two vertex buffers are reserved for parameters and
+		/* The First four vertex buffers are reserved for parameters and
 		 * global buffers. */
-		unsigned vtx_id = 2 + i;
+		unsigned vtx_id = 4 + i;
 		if (resources[i]) {
 			struct r600_resource_global *buffer =
 				(struct r600_resource_global*)
@@ -685,9 +688,15 @@ static void evergreen_set_global_binding(struct pipe_context *ctx,
 		*(handles[i]) = util_cpu_to_le32(handle);
 	}
 
+	/* globals for writing */
 	evergreen_set_rat(rctx->cs_shader_state.shader, 0, pool->bo, 0, pool->size_in_dw * 4);
+	/* globals for reading */
 	evergreen_cs_set_vertex_buffer(rctx, 1, 0,
 				(struct pipe_resource*)pool->bo);
+
+	/* constants for reading, LLVM puts them in text segment */
+	evergreen_cs_set_vertex_buffer(rctx, 2, 0,
+				(struct pipe_resource*)rctx->cs_shader_state.shader->code_bo);
 }
 
 /**
@@ -968,18 +977,6 @@ static void r600_compute_global_transfer_flush_region(struct pipe_context *ctx,
 	assert(0 && "TODO");
 }
 
-static void r600_compute_global_transfer_inline_write(struct pipe_context *pipe,
-						      struct pipe_resource *resource,
-						      unsigned level,
-						      unsigned usage,
-						      const struct pipe_box *box,
-						      const void *data,
-						      unsigned stride,
-						      unsigned layer_stride)
-{
-	assert(0 && "TODO");
-}
-
 static void r600_compute_global_buffer_destroy(struct pipe_screen *screen,
 					       struct pipe_resource *res)
 {
@@ -1005,7 +1002,6 @@ static const struct u_resource_vtbl r600_global_buffer_vtbl =
 	r600_compute_global_transfer_map, /* transfer_map */
 	r600_compute_global_transfer_flush_region,/* transfer_flush_region */
 	r600_compute_global_transfer_unmap, /* transfer_unmap */
-	r600_compute_global_transfer_inline_write /* transfer_inline_write */
 };
 
 struct pipe_resource *r600_compute_global_buffer_create(struct pipe_screen *screen,

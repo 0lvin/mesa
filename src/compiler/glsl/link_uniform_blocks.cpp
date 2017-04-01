@@ -34,9 +34,10 @@ namespace {
 class ubo_visitor : public program_resource_visitor {
 public:
    ubo_visitor(void *mem_ctx, gl_uniform_buffer_variable *variables,
-               unsigned num_variables)
+               unsigned num_variables, struct gl_shader_program *prog)
       : index(0), offset(0), buffer_size(0), variables(variables),
-        num_variables(num_variables), mem_ctx(mem_ctx), is_array_instance(false)
+        num_variables(num_variables), mem_ctx(mem_ctx), is_array_instance(false),
+        prog(prog)
    {
       /* empty */
    }
@@ -56,6 +57,7 @@ public:
    unsigned num_variables;
    void *mem_ctx;
    bool is_array_instance;
+   struct gl_shader_program *prog;
 
 private:
    virtual void visit_field(const glsl_type *type, const char *name,
@@ -68,7 +70,7 @@ private:
    }
 
    virtual void enter_record(const glsl_type *type, const char *,
-                             bool row_major, const unsigned packing) {
+                             bool row_major, const enum glsl_interface_packing packing) {
       assert(type->is_record());
       if (packing == GLSL_INTERFACE_PACKING_STD430)
          this->offset = glsl_align(
@@ -79,7 +81,7 @@ private:
    }
 
    virtual void leave_record(const glsl_type *type, const char *,
-                             bool row_major, const unsigned packing) {
+                             bool row_major, const enum glsl_interface_packing packing) {
       assert(type->is_record());
 
       /* If this is the last field of a structure, apply rule #9.  The
@@ -104,7 +106,7 @@ private:
 
    virtual void visit_field(const glsl_type *type, const char *name,
                             bool row_major, const glsl_type *,
-                            const unsigned packing,
+                            const enum glsl_interface_packing packing,
                             bool last_field)
    {
       assert(this->index < this->num_variables);
@@ -148,7 +150,13 @@ private:
        */
       const glsl_type *type_for_size = type;
       if (type->is_unsized_array()) {
-         assert(last_field);
+         if (!last_field) {
+            linker_error(prog, "unsized array `%s' definition: "
+                         "only last member of a shader storage block "
+                         "can be defined as unsized array",
+                         name);
+         }
+
          type_for_size = type->without_array();
       }
 
@@ -314,7 +322,7 @@ create_buffer_blocks(void *mem_ctx, struct gl_context *ctx,
    /* Add each variable from each uniform block to the API tracking
     * structures.
     */
-   ubo_visitor parcel(blocks, variables, num_variables);
+   ubo_visitor parcel(blocks, variables, num_variables, prog);
 
    STATIC_ASSERT(unsigned(GLSL_INTERFACE_PACKING_STD140)
                  == unsigned(ubo_packing_std140));
@@ -383,8 +391,7 @@ void
 link_uniform_blocks(void *mem_ctx,
                     struct gl_context *ctx,
                     struct gl_shader_program *prog,
-                    struct gl_shader **shader_list,
-                    unsigned num_shaders,
+                    struct gl_linked_shader *shader,
                     struct gl_uniform_block **ubo_blocks,
                     unsigned *num_ubo_blocks,
                     struct gl_uniform_block **ssbo_blocks,
@@ -407,9 +414,7 @@ link_uniform_blocks(void *mem_ctx,
    /* Determine which uniform blocks are active.
     */
    link_uniform_block_active_visitor v(mem_ctx, block_hash, prog);
-   for (unsigned i = 0; i < num_shaders; i++) {
-      visit_list_elements(&v, shader_list[i]->ir);
-   }
+   visit_list_elements(&v, shader->ir);
 
    /* Count the number of active uniform blocks.  Count the total number of
     * active slots in those uniform blocks.
@@ -464,7 +469,7 @@ link_uniform_blocks(void *mem_ctx,
    _mesa_hash_table_destroy(block_hash, NULL);
 }
 
-bool
+static bool
 link_uniform_blocks_are_compatible(const gl_uniform_block *a,
                                    const gl_uniform_block *b)
 {

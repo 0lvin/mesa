@@ -52,15 +52,17 @@ vec4_gs_visitor::vec4_gs_visitor(const struct brw_compiler *compiler,
 
 
 dst_reg *
-vec4_gs_visitor::make_reg_for_system_value(int location,
-                                           const glsl_type *type)
+vec4_gs_visitor::make_reg_for_system_value(int location)
 {
-   dst_reg *reg = new(mem_ctx) dst_reg(this, type);
+   dst_reg *reg = new(mem_ctx) dst_reg(this, glsl_type::int_type);
 
    switch (location) {
    case SYSTEM_VALUE_INVOCATION_ID:
       this->current_annotation = "initialize gl_InvocationID";
-      emit(GS_OPCODE_GET_INSTANCE_ID, *reg);
+      if (gs_prog_data->invocations > 1)
+         emit(GS_OPCODE_GET_INSTANCE_ID, *reg);
+      else
+         emit(MOV(*reg, brw_imm_ud(0)));
       break;
    default:
       unreachable("not reached");
@@ -335,7 +337,7 @@ vec4_gs_visitor::emit_control_data_bits()
       emit(ADD(dst_reg(prev_count), this->vertex_count,
                brw_imm_ud(0xffffffffu)));
       unsigned log2_bits_per_vertex =
-         _mesa_fls(c->control_data_bits_per_vertex);
+         util_last_bit(c->control_data_bits_per_vertex);
       emit(SHR(dst_reg(dword_index), prev_count,
                brw_imm_ud(6 - log2_bits_per_vertex)));
    }
@@ -539,6 +541,9 @@ vec4_gs_visitor::gs_end_primitive()
        GEN7_GS_CONTROL_DATA_FORMAT_GSCTL_CUT) {
       return;
    }
+
+   if (c->control_data_header_size_bits == 0)
+      return;
 
    /* Cut bits use one bit per vertex. */
    assert(c->control_data_bits_per_vertex == 1);
@@ -811,13 +816,11 @@ brw_compile_gs(const struct brw_compiler *compiler, void *log_data,
    }
 
    if (is_scalar) {
-      /* TODO: Support instanced GS.  We have basically no tests... */
-      assert(prog_data->invocations == 1);
-
       fs_visitor v(compiler, log_data, mem_ctx, &c, prog_data, shader,
                    shader_time_index);
       if (v.run_gs()) {
          prog_data->base.dispatch_mode = DISPATCH_MODE_SIMD8;
+         prog_data->base.base.dispatch_grf_start_reg = v.payload.num_regs;
 
          fs_generator g(compiler, log_data, mem_ctx, &c.key,
                         &prog_data->base.base, v.promoted_constants,

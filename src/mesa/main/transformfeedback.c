@@ -505,12 +505,12 @@ _mesa_EndTransformFeedback(void)
    FLUSH_VERTICES(ctx, 0);
    ctx->NewDriverState |= ctx->DriverFlags.NewTransformFeedback;
 
+   assert(ctx->Driver.EndTransformFeedback);
+   ctx->Driver.EndTransformFeedback(ctx, obj);
+
    ctx->TransformFeedback.CurrentObject->Active = GL_FALSE;
    ctx->TransformFeedback.CurrentObject->Paused = GL_FALSE;
    ctx->TransformFeedback.CurrentObject->EndedAnytime = GL_TRUE;
-
-   assert(ctx->Driver.EndTransformFeedback);
-   ctx->Driver.EndTransformFeedback(ctx, obj);
 }
 
 
@@ -846,12 +846,10 @@ _mesa_TransformFeedbackVaryings(GLuint program, GLsizei count,
       return;
    }
 
-   shProg = _mesa_lookup_shader_program(ctx, program);
-   if (!shProg) {
-      _mesa_error(ctx, GL_INVALID_VALUE,
-                  "glTransformFeedbackVaryings(program=%u)", program);
+   shProg = _mesa_lookup_shader_program_err(ctx, program,
+                                            "glTransformFeedbackVaryings");
+   if (!shProg)
       return;
-   }
 
    if (ctx->Extensions.ARB_transform_feedback3) {
       if (bufferMode == GL_INTERLEAVED_ATTRIBS) {
@@ -927,12 +925,10 @@ _mesa_GetTransformFeedbackVarying(GLuint program, GLuint index,
    struct gl_program_resource *res;
    GET_CURRENT_CONTEXT(ctx);
 
-   shProg = _mesa_lookup_shader_program(ctx, program);
-   if (!shProg) {
-      _mesa_error(ctx, GL_INVALID_VALUE,
-                  "glGetTransformFeedbackVarying(program=%u)", program);
+   shProg = _mesa_lookup_shader_program_err(ctx, program,
+                                            "glGetTransformFeedbackVarying");
+   if (!shProg)
       return;
-   }
 
    res = _mesa_program_resource_find_index((struct gl_shader_program *) shProg,
                                            GL_TRANSFORM_FEEDBACK_VARYING,
@@ -1173,10 +1169,10 @@ _mesa_PauseTransformFeedback(void)
    FLUSH_VERTICES(ctx, 0);
    ctx->NewDriverState |= ctx->DriverFlags.NewTransformFeedback;
 
-   obj->Paused = GL_TRUE;
-
    assert(ctx->Driver.PauseTransformFeedback);
    ctx->Driver.PauseTransformFeedback(ctx, obj);
+
+   obj->Paused = GL_TRUE;
 }
 
 
@@ -1291,12 +1287,13 @@ _mesa_GetTransformFeedbacki64_v(GLuint xfb, GLenum pname, GLuint index,
       return;
    }
 
+   compute_transform_feedback_buffer_sizes(obj);
    switch(pname) {
    case GL_TRANSFORM_FEEDBACK_BUFFER_START:
       *param = obj->Offset[index];
       break;
    case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
-      *param = obj->RequestedSize[index];
+      *param = obj->Size[index];
       break;
    default:
       _mesa_error(ctx, GL_INVALID_ENUM,

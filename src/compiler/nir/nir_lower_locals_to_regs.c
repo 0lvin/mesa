@@ -119,7 +119,7 @@ get_reg_for_deref(nir_deref_var *deref, struct locals_to_regs_state *state)
    nir_register *reg = nir_local_reg_create(state->impl);
    reg->num_components = glsl_get_vector_elements(tail->type);
    reg->num_array_elems = array_size > 1 ? array_size : 0;
-   reg->bit_size = glsl_get_bit_size(glsl_get_base_type(tail->type));
+   reg->bit_size = glsl_get_bit_size(tail->type);
 
    _mesa_hash_table_insert_pre_hashed(state->regs_table, hash, deref, reg);
    nir_array_add(&state->derefs_array, nir_deref_var *, deref);
@@ -201,11 +201,10 @@ get_deref_reg_src(nir_deref_var *deref, nir_instr *instr,
 }
 
 static bool
-lower_locals_to_regs_block(nir_block *block, void *void_state)
+lower_locals_to_regs_block(nir_block *block,
+                           struct locals_to_regs_state *state)
 {
-   struct locals_to_regs_state *state = void_state;
-
-   nir_foreach_instr_safe(block, instr) {
+   nir_foreach_instr_safe(instr, block) {
       if (instr->type != nir_instr_type_intrinsic)
          continue;
 
@@ -283,7 +282,6 @@ compute_reg_usedef_lca(nir_register *reg)
 
    list_for_each_entry(nir_src, use_src, &reg->if_uses, use_link) {
       nir_cf_node *prev_node = nir_cf_node_prev(&use_src->parent_if->cf_node);
-      assert(prev_node->type == nir_cf_node_block);
       lca = nir_dominance_lca(lca, nir_cf_node_as_block(prev_node));
    }
 
@@ -358,7 +356,9 @@ nir_lower_locals_to_regs_impl(nir_function_impl *impl)
 
    nir_metadata_require(impl, nir_metadata_dominance);
 
-   nir_foreach_block_call(impl, lower_locals_to_regs_block, &state);
+   nir_foreach_block(block, impl) {
+      lower_locals_to_regs_block(block, &state);
+   }
 
    nir_array_foreach(&state.derefs_array, nir_deref_var *, deref_ptr) {
       nir_deref_var *deref = *deref_ptr;
@@ -389,7 +389,7 @@ nir_lower_locals_to_regs(nir_shader *shader)
 {
    bool progress = false;
 
-   nir_foreach_function(shader, function) {
+   nir_foreach_function(function, shader) {
       if (function->impl)
          progress = nir_lower_locals_to_regs_impl(function->impl) || progress;
    }

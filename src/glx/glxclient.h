@@ -56,6 +56,11 @@
 
 #include "glxextensions.h"
 
+#if defined(USE_LIBGLVND_GLX)
+#define _GLX_PUBLIC _X_HIDDEN
+#else
+#define _GLX_PUBLIC _X_EXPORT
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -149,10 +154,14 @@ struct __GLXDRIdrawableRec
 extern __GLXDRIdisplay *driswCreateDisplay(Display * dpy);
 extern __GLXDRIdisplay *driCreateDisplay(Display * dpy);
 extern __GLXDRIdisplay *dri2CreateDisplay(Display * dpy);
+extern __GLXDRIdisplay *dri3_create_display(Display * dpy);
+extern __GLXDRIdisplay *driwindowsCreateDisplay(Display * dpy);
+
+/*
+**
+*/
 extern void dri2InvalidateBuffers(Display *dpy, XID drawable);
 extern unsigned dri2GetSwapEventType(Display *dpy, XID drawable);
-
-extern __GLXDRIdisplay *dri3_create_display(Display * dpy);
 
 /*
 ** Functions to obtain driver configuration information from a direct
@@ -213,9 +222,9 @@ typedef struct __GLXattributeMachineRec
    __GLXattribute **stackPointer;
 } __GLXattributeMachine;
 
-typedef struct _mesa_glinterop_device_info mesa_glinterop_device_info;
-typedef struct _mesa_glinterop_export_in mesa_glinterop_export_in;
-typedef struct _mesa_glinterop_export_out mesa_glinterop_export_out;
+struct mesa_glinterop_device_info;
+struct mesa_glinterop_export_in;
+struct mesa_glinterop_export_out;
 
 struct glx_context_vtable {
    void (*destroy)(struct glx_context *ctx);
@@ -232,10 +241,10 @@ struct glx_context_vtable {
    void (*release_tex_image)(Display * dpy, GLXDrawable drawable, int buffer);
    void * (*get_proc_address)(const char *symbol);
    int (*interop_query_device_info)(struct glx_context *ctx,
-                                    mesa_glinterop_device_info *out);
+                                    struct mesa_glinterop_device_info *out);
    int (*interop_export_object)(struct glx_context *ctx,
-                                const mesa_glinterop_export_in *in,
-                                mesa_glinterop_export_out *out);
+                                struct mesa_glinterop_export_in *in,
+                                struct mesa_glinterop_export_out *out);
 };
 
 /**
@@ -600,6 +609,9 @@ struct glx_display
    __GLXDRIdisplay *driDisplay;
    __GLXDRIdisplay *dri2Display;
    __GLXDRIdisplay *dri3Display;
+#endif
+#ifdef GLX_USE_WINDOWSGL
+   __GLXDRIdisplay *windowsdriDisplay;
 #endif
 };
 

@@ -445,46 +445,6 @@ ptn_sge(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
 }
 
 static void
-ptn_sle(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
-{
-   nir_ssa_def *commuted[] = { src[1], src[0] };
-   ptn_sge(b, dest, commuted);
-}
-
-static void
-ptn_sgt(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
-{
-   nir_ssa_def *commuted[] = { src[1], src[0] };
-   ptn_slt(b, dest, commuted);
-}
-
-/**
- * Emit SEQ.  For platforms with integers, prefer b2f(feq(...)).
- */
-static void
-ptn_seq(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
-{
-   if (b->shader->options->native_integers) {
-      ptn_move_dest(b, dest, nir_b2f(b, nir_feq(b, src[0], src[1])));
-   } else {
-      ptn_move_dest(b, dest, nir_seq(b, src[0], src[1]));
-   }
-}
-
-/**
- * Emit SNE.  For platforms with integers, prefer b2f(fne(...)).
- */
-static void
-ptn_sne(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
-{
-   if (b->shader->options->native_integers) {
-      ptn_move_dest(b, dest, nir_b2f(b, nir_fne(b, src[0], src[1])));
-   } else {
-      ptn_move_dest(b, dest, nir_sne(b, src[0], src[1]));
-   }
-}
-
-static void
 ptn_xpd(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src)
 {
    ptn_move_dest_masked(b, dest,
@@ -636,6 +596,8 @@ ptn_tex(nir_builder *b, nir_alu_dest dest, nir_ssa_def **src,
    case GLSL_SAMPLER_DIM_CUBE:
       instr->coord_components = 3;
       break;
+   case GLSL_SAMPLER_DIM_SUBPASS:
+      unreachable("can't reach");
    }
 
    unsigned src_number = 0;
@@ -706,7 +668,7 @@ static const nir_op op_trans[MAX_OPCODE] = {
    [OPCODE_LIT] = 0,
    [OPCODE_LOG] = 0,
    [OPCODE_LRP] = 0,
-   [OPCODE_MAD] = nir_op_ffma,
+   [OPCODE_MAD] = 0,
    [OPCODE_MAX] = nir_op_fmax,
    [OPCODE_MIN] = nir_op_fmin,
    [OPCODE_MOV] = nir_op_fmov,
@@ -716,13 +678,9 @@ static const nir_op op_trans[MAX_OPCODE] = {
 
    [OPCODE_RSQ] = 0,
    [OPCODE_SCS] = 0,
-   [OPCODE_SEQ] = 0,
    [OPCODE_SGE] = 0,
-   [OPCODE_SGT] = 0,
    [OPCODE_SIN] = 0,
-   [OPCODE_SLE] = 0,
    [OPCODE_SLT] = 0,
-   [OPCODE_SNE] = 0,
    [OPCODE_SSG] = nir_op_fsign,
    [OPCODE_SUB] = nir_op_fsub,
    [OPCODE_SWZ] = 0,
@@ -801,6 +759,10 @@ ptn_emit_instruction(struct ptn_compile *c, struct prog_instruction *prog_inst)
       ptn_lrp(b, dest, src);
       break;
 
+   case OPCODE_MAD:
+      ptn_move_dest(b, dest, nir_fadd(b, nir_fmul(b, src[0], src[1]), src[2]));
+      break;
+
    case OPCODE_DST:
       ptn_dst(b, dest, src);
       break;
@@ -845,24 +807,8 @@ ptn_emit_instruction(struct ptn_compile *c, struct prog_instruction *prog_inst)
       ptn_slt(b, dest, src);
       break;
 
-   case OPCODE_SGT:
-      ptn_sgt(b, dest, src);
-      break;
-
-   case OPCODE_SLE:
-      ptn_sle(b, dest, src);
-      break;
-
    case OPCODE_SGE:
       ptn_sge(b, dest, src);
-      break;
-
-   case OPCODE_SEQ:
-      ptn_seq(b, dest, src);
-      break;
-
-   case OPCODE_SNE:
-      ptn_sne(b, dest, src);
       break;
 
    case OPCODE_TEX:
@@ -943,7 +889,7 @@ setup_registers_and_variables(struct ptn_compile *c)
    struct nir_shader *shader = b->shader;
 
    /* Create input variables. */
-   const int num_inputs = _mesa_flsll(c->prog->InputsRead);
+   const int num_inputs = util_last_bit64(c->prog->InputsRead);
    for (int i = 0; i < num_inputs; i++) {
       if (!(c->prog->InputsRead & BITFIELD64_BIT(i)))
          continue;
@@ -1004,7 +950,7 @@ setup_registers_and_variables(struct ptn_compile *c)
    }
 
    /* Create output registers and variables. */
-   int max_outputs = _mesa_fls(c->prog->OutputsWritten);
+   int max_outputs = util_last_bit(c->prog->OutputsWritten);
    c->output_regs = rzalloc_array(c, nir_register *, max_outputs);
 
    for (int i = 0; i < max_outputs; i++) {
@@ -1099,7 +1045,7 @@ prog_to_nir(const struct gl_program *prog,
    ptn_add_output_stores(c);
 
    s->info.name = ralloc_asprintf(s, "ARB%d", prog->Id);
-   s->info.num_textures = _mesa_fls(prog->SamplersUsed);
+   s->info.num_textures = util_last_bit(prog->SamplersUsed);
    s->info.num_ubos = 0;
    s->info.num_abos = 0;
    s->info.num_ssbos = 0;

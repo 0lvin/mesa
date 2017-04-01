@@ -35,24 +35,29 @@
 #include "JitManager.h"
 #include "fetch_jit.h"
 
+#pragma push_macro("DEBUG")
+#undef DEBUG
+
 #if defined(_WIN32)
 #include "llvm/ADT/Triple.h"
 #endif
 #include "llvm/IR/Function.h"
-#include "llvm/Support/DynamicLibrary.h"
 
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 
 #include "llvm/Analysis/CFGPrinter.h"
 #include "llvm/IRReader/IRReader.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Support/FormattedStream.h"
 
 #if LLVM_USE_INTEL_JITEVENTS
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #endif
 
+#pragma pop_macro("DEBUG")
+
 #include "core/state.h"
-#include "common/containers.hpp"
 
 #include "state_llvm.h"
 
@@ -67,11 +72,12 @@
 #endif
 
 using namespace llvm;
+using namespace SwrJit;
 
 //////////////////////////////////////////////////////////////////////////
 /// @brief Contructor for JitManager.
 /// @param simdWidth - SIMD width to be used in generated program.
-JitManager::JitManager(uint32_t simdWidth, const char *arch)
+JitManager::JitManager(uint32_t simdWidth, const char *arch, const char* core)
     : mContext(), mBuilder(mContext), mIsModuleFinalized(true), mJitNumber(0), mVWidth(simdWidth), mArch(arch)
 {
     InitializeNativeTarget();
@@ -91,6 +97,9 @@ JitManager::JitManager(uint32_t simdWidth, const char *arch)
 
     //tOpts.PrintMachineCode    = true;
 
+    mCore = std::string(core);
+    std::transform(mCore.begin(), mCore.end(), mCore.begin(), ::tolower);
+
     std::stringstream fnName("JitModule", std::ios_base::in | std::ios_base::out | std::ios_base::ate);
     fnName << mJitNumber++;
     std::unique_ptr<Module> newModule(new Module(fnName.str(), mContext));
@@ -102,47 +111,7 @@ JitManager::JitManager(uint32_t simdWidth, const char *arch)
 
     StringRef hostCPUName;
 
-    // force JIT to use the same CPU arch as the rest of swr
-    if(mArch.AVX512F())
-    {
-        assert(0 && "Implement AVX512 jitter");
-        hostCPUName = sys::getHostCPUName();
-        if (mVWidth == 0)
-        {
-            mVWidth = 16;
-        }
-    }
-    else if(mArch.AVX2())
-    {
-        hostCPUName = StringRef("core-avx2");
-        if (mVWidth == 0)
-        {
-            mVWidth = 8;
-        }
-    }
-    else if(mArch.AVX())
-    {
-        if (mArch.F16C())
-        {
-            hostCPUName = StringRef("core-avx-i");
-        }
-        else
-        {
-            hostCPUName = StringRef("corei7-avx");
-        }
-        if (mVWidth == 0)
-        {
-            mVWidth = 8;
-        }
-    }
-    else
-    {
-        hostCPUName = sys::getHostCPUName();
-        if (mVWidth == 0)
-        {
-            mVWidth = 8; // 4?
-        }
-    }
+    hostCPUName = sys::getHostCPUName();
 
     EB.setMCPU(hostCPUName);
 
@@ -230,11 +199,21 @@ bool JitManager::SetupModuleFromIR(const uint8_t *pIR)
     SMDiagnostic Err;
     std::unique_ptr<Module> newModule = parseIR(pMem.get()->getMemBufferRef(), Err, mContext);
 
+    SWR_REL_ASSERT(
+        !(newModule == nullptr),
+        "Parse failed!\n"
+        "%s", Err.getMessage().data());
     if (newModule == nullptr)
     {
-        SWR_ASSERT(0, "Parse failed! Check Err for details.");
         return false;
     }
+
+#if HAVE_LLVM == 0x307
+    // llvm-3.7 has mismatched setDataLyout/getDataLayout APIs
+    newModule->setDataLayout(*mpExec->getDataLayout());
+#else
+    newModule->setDataLayout(mpExec->getDataLayout());
+#endif
 
     mpCurrentModule = newModule.get();
 #if defined(_WIN32)
@@ -248,6 +227,52 @@ bool JitManager::SetupModuleFromIR(const uint8_t *pIR)
     mIsModuleFinalized = false;
 
     return true;
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// @brief Dump function x86 assembly to file.
+/// @note This should only be called after the module has been jitted to x86 and the
+///       module will not be further accessed.
+void JitManager::DumpAsm(Function* pFunction, const char* fileName)
+{
+    if (KNOB_DUMP_SHADER_IR)
+    {
+
+#if defined(_WIN32)
+        DWORD pid = GetCurrentProcessId();
+        TCHAR procname[MAX_PATH];
+        GetModuleFileName(NULL, procname, MAX_PATH);
+        const char* pBaseName = strrchr(procname, '\\');
+        std::stringstream outDir;
+        outDir << JITTER_OUTPUT_DIR << pBaseName << "_" << pid << std::ends;
+        CreateDirectory(outDir.str().c_str(), NULL);
+#endif
+
+        std::error_code EC;
+        Module* pModule = pFunction->getParent();
+        const char *funcName = pFunction->getName().data();
+        char fName[256];
+#if defined(_WIN32)
+        sprintf(fName, "%s\\%s.%s.asm", outDir.str().c_str(), funcName, fileName);
+#else
+        sprintf(fName, "%s.%s.asm", funcName, fileName);
+#endif
+
+#if HAVE_LLVM == 0x306
+        raw_fd_ostream fd(fName, EC, llvm::sys::fs::F_None);
+        formatted_raw_ostream filestream(fd);
+#else
+        raw_fd_ostream filestream(fName, EC, llvm::sys::fs::F_None);
+#endif
+
+        legacy::PassManager* pMPasses = new legacy::PassManager();
+        auto* pTarget = mpExec->getTargetMachine();
+        pTarget->Options.MCOptions.AsmVerbose = true;
+        pTarget->addPassesToEmitFile(*pMPasses, filestream, TargetMachine::CGFT_AssemblyFile);
+        pMPasses->run(*pModule);
+        delete pMPasses;
+        pTarget->Options.MCOptions.AsmVerbose = false;
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -294,18 +319,23 @@ void JitManager::DumpToFile(Function *f, const char *fileName)
 
 extern "C"
 {
+    bool g_DllActive = true;
+
     //////////////////////////////////////////////////////////////////////////
     /// @brief Create JIT context.
     /// @param simdWidth - SIMD width to be used in generated program.
-    HANDLE JITCALL JitCreateContext(uint32_t targetSimdWidth, const char* arch)
+    HANDLE JITCALL JitCreateContext(uint32_t targetSimdWidth, const char* arch, const char* core)
     {
-        return new JitManager(targetSimdWidth, arch);
+        return new JitManager(targetSimdWidth, arch, core);
     }
 
     //////////////////////////////////////////////////////////////////////////
     /// @brief Destroy JIT context.
     void JITCALL JitDestroyContext(HANDLE hJitContext)
     {
-        delete reinterpret_cast<JitManager*>(hJitContext);
+        if (g_DllActive)
+        {
+            delete reinterpret_cast<JitManager*>(hJitContext);
+        }
     }
 }

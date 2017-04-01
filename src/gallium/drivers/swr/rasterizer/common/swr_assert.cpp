@@ -121,8 +121,6 @@ bool SwrAssert(
     const char* pFmtString /* = nullptr */,
     ...)
 {
-    if (!enabled) return false;
-
     SetTextColor(stderr, TEXT_CYAN, TEXT_NORMAL);
 
     fprintf(stderr, "%s(%d): ", pFileName, lineNum);
@@ -182,7 +180,7 @@ bool SwrAssert(
         OutputDebugStringA("\n");
     }
 
-    if (KNOB_ENABLE_ASSERT_DIALOGS)
+    if (enabled && KNOB_ENABLE_ASSERT_DIALOGS)
     {
         int retval = sprintf_s(
             &msgBuf[offset],
@@ -211,7 +209,7 @@ bool SwrAssert(
                 "\n\n*** NO DEBUGGER DETECTED ***\n\nPressing \"Try Again\" will cause a program crash!");
         }
 
-        retval = MessageBoxA(nullptr, msgBuf, "Assert Failed", MB_CANCELTRYCONTINUE | MB_ICONEXCLAMATION);
+        retval = MessageBoxA(nullptr, msgBuf, "Assert Failed", MB_CANCELTRYCONTINUE | MB_ICONEXCLAMATION | MB_SETFOREGROUND);
 
         switch (retval)
         {
@@ -228,11 +226,11 @@ bool SwrAssert(
     }
     else
     {
-        return IsDebuggerPresent() || !chkDebugger;
+        return (IsDebuggerPresent() || !chkDebugger) && enabled;
     }
 #endif // _WIN32
 
-    return true;
+    return enabled;
 }
 
 #endif // SWR_ENABLE_ASSERTS

@@ -96,6 +96,7 @@ private:
    void emitDMUL(const Instruction *);
    void emitIMAD(const Instruction *);
    void emitISAD(const Instruction *);
+   void emitSHLADD(const Instruction *);
    void emitFMAD(const Instruction *);
    void emitDMAD(const Instruction *);
    void emitMADSP(const Instruction *i);
@@ -757,6 +758,54 @@ CodeEmitterGK110::emitISAD(const Instruction *i)
 }
 
 void
+CodeEmitterGK110::emitSHLADD(const Instruction *i)
+{
+   uint8_t addOp = (i->src(2).mod.neg() << 1) | i->src(0).mod.neg();
+   const ImmediateValue *imm = i->src(1).get()->asImm();
+   assert(imm);
+
+   if (i->src(2).getFile() == FILE_IMMEDIATE) {
+      code[0] = 0x1;
+      code[1] = 0xc0c << 20;
+   } else {
+      code[0] = 0x2;
+      code[1] = 0x20c << 20;
+   }
+   code[1] |= addOp << 19;
+
+   emitPredicate(i);
+
+   defId(i->def(0), 2);
+   srcId(i->src(0), 10);
+
+   if (i->flagsDef >= 0)
+      code[1] |= 1 << 18;
+
+   assert(!(imm->reg.data.u32 & 0xffffffe0));
+   code[1] |= imm->reg.data.u32 << 10;
+
+   switch (i->src(2).getFile()) {
+   case FILE_GPR:
+      assert(code[0] & 0x2);
+      code[1] |= 0xc << 28;
+      srcId(i->src(2), 23);
+      break;
+   case FILE_MEMORY_CONST:
+      assert(code[0] & 0x2);
+      code[1] |= 0x4 << 28;
+      setCAddress14(i->src(2));
+      break;
+   case FILE_IMMEDIATE:
+      assert(code[0] & 0x1);
+      setShortImmediate(i, 2);
+      break;
+   default:
+      assert(!"bad src2 file");
+      break;
+   }
+}
+
+void
 CodeEmitterGK110::emitNOT(const Instruction *i)
 {
    code[0] = 0x0003fc02; // logop(mov2) dst, 0, not src
@@ -773,7 +822,7 @@ CodeEmitterGK110::emitNOT(const Instruction *i)
       break;
    case FILE_MEMORY_CONST:
       code[1] |= 0x4 << 28;
-      setCAddress14(i->src(1));
+      setCAddress14(i->src(0));
       break;
    default:
       assert(0);
@@ -1113,12 +1162,26 @@ CodeEmitterGK110::emitSLCT(const CmpInstruction *i)
    }
 }
 
+static void
+selpFlip(const FixupEntry *entry, uint32_t *code, const FixupData& data)
+{
+   int loc = entry->loc;
+   if (data.force_persample_interp)
+      code[loc + 1] |= 1 << 13;
+   else
+      code[loc + 1] &= ~(1 << 13);
+}
+
 void CodeEmitterGK110::emitSELP(const Instruction *i)
 {
    emitForm_21(i, 0x250, 0x050);
 
    if (i->src(2).mod & Modifier(NV50_IR_MOD_NOT))
       code[1] |= 1 << 13;
+
+   if (i->subOp == 1) {
+      addInterp(0, 0, selpFlip);
+   }
 }
 
 void CodeEmitterGK110::emitTEXBAR(const Instruction *i)
@@ -1307,14 +1370,11 @@ void
 CodeEmitterGK110::emitQUADOP(const Instruction *i, uint8_t qOp, uint8_t laneMask)
 {
    code[0] = 0x00000002 | ((qOp & 1) << 31);
-   code[1] = 0x7fc00000 | (qOp >> 1) | (laneMask << 12);
+   code[1] = 0x7fc00200 | (qOp >> 1) | (laneMask << 12); // dall
 
    defId(i->def(0), 2);
    srcId(i->src(0), 10);
    srcId((i->srcExists(1) && i->predSrc != 1) ? i->src(1) : i->src(0), 23);
-
-   if (i->op == OP_QUADOP && progType != Program::TYPE_FRAGMENT)
-      code[1] |= 1 << 9; // dall
 
    emitPredicate(i);
 }
@@ -1467,16 +1527,31 @@ CodeEmitterGK110::emitFlow(const Instruction *i)
 void
 CodeEmitterGK110::emitVOTE(const Instruction *i)
 {
-   assert(i->src(0).getFile() == FILE_PREDICATE &&
-          i->def(1).getFile() == FILE_PREDICATE);
+   assert(i->src(0).getFile() == FILE_PREDICATE);
 
    code[0] = 0x00000002;
    code[1] = 0x86c00000 | (i->subOp << 19);
 
    emitPredicate(i);
 
-   defId(i->def(0), 2);
-   defId(i->def(1), 48);
+   unsigned rp = 0;
+   for (int d = 0; i->defExists(d); d++) {
+      if (i->def(d).getFile() == FILE_PREDICATE) {
+         assert(!(rp & 2));
+         rp |= 2;
+         defId(i->def(d), 48);
+      } else if (i->def(d).getFile() == FILE_GPR) {
+         assert(!(rp & 1));
+         rp |= 1;
+         defId(i->def(d), 2);
+      } else {
+         assert(!"Unhandled def");
+      }
+   }
+   if (!(rp & 1))
+      code[0] |= 255 << 2;
+   if (!(rp & 2))
+      code[1] |= 7 << 16;
    if (i->src(0).mod == Modifier(NV50_IR_MOD_NOT))
       code[1] |= 1 << 13;
    srcId(i->src(0), 42);
@@ -1854,18 +1929,17 @@ CodeEmitterGK110::emitInterpMode(const Instruction *i)
 }
 
 static void
-interpApply(const InterpEntry *entry, uint32_t *code,
-      bool force_persample_interp, bool flatshade)
+interpApply(const FixupEntry *entry, uint32_t *code, const FixupData& data)
 {
    int ipa = entry->ipa;
    int reg = entry->reg;
    int loc = entry->loc;
 
-   if (flatshade &&
+   if (data.flatshade &&
        (ipa & NV50_IR_INTERP_MODE_MASK) == NV50_IR_INTERP_SC) {
       ipa = NV50_IR_INTERP_FLAT;
       reg = 0xff;
-   } else if (force_persample_interp &&
+   } else if (data.force_persample_interp &&
               (ipa & NV50_IR_INTERP_SAMPLE_MASK) == NV50_IR_INTERP_DEFAULT &&
               (ipa & NV50_IR_INTERP_MODE_MASK) != NV50_IR_INTERP_FLAT) {
       ipa |= NV50_IR_INTERP_CENTROID;
@@ -2067,15 +2141,29 @@ CodeEmitterGK110::emitLOAD(const Instruction *i)
    code[1] |= offset >> 9;
 
    // Locked store on shared memory can fail.
+   int r = 0, p = -1;
    if (i->src(0).getFile() == FILE_MEMORY_SHARED &&
        i->subOp == NV50_IR_SUBOP_LOAD_LOCKED) {
-      assert(i->defExists(1));
-      defId(i->def(1), 32 + 16);
+      if (i->def(0).getFile() == FILE_PREDICATE) { // p, #
+         r = -1;
+         p = 0;
+      } else if (i->defExists(1)) { // r, p
+         p = 1;
+      } else {
+         assert(!"Expected predicate dest for load locked");
+      }
    }
 
    emitPredicate(i);
 
-   defId(i->def(0), 2);
+   if (r >= 0)
+      defId(i->def(r), 2);
+   else
+      code[0] |= 255 << 2;
+
+   if (p >= 0)
+      defId(i->def(p), 32 + 16);
+
    if (i->getIndirect(0, 0)) {
       srcId(i->src(0).getIndirect(0), 10);
       if (i->getIndirect(0, 0)->reg.size == 8)
@@ -2112,6 +2200,34 @@ CodeEmitterGK110::getSRegEncoding(const ValueRef& ref)
 void
 CodeEmitterGK110::emitMOV(const Instruction *i)
 {
+   if (i->def(0).getFile() == FILE_PREDICATE) {
+      if (i->src(0).getFile() == FILE_GPR) {
+         // Use ISETP.NE.AND dst, PT, src, RZ, PT
+         code[0] = 0x00000002;
+         code[1] = 0xdb500000;
+
+         code[0] |= 0x7 << 2;
+         code[0] |= 0xff << 23;
+         code[1] |= 0x7 << 10;
+         srcId(i->src(0), 10);
+      } else
+      if (i->src(0).getFile() == FILE_PREDICATE) {
+         // Use PSETP.AND.AND dst, PT, src, PT, PT
+         code[0] = 0x00000002;
+         code[1] = 0x84800000;
+
+         code[0] |= 0x7 << 2;
+         code[1] |= 0x7 << 0;
+         code[1] |= 0x7 << 10;
+
+         srcId(i->src(0), 14);
+      } else {
+         assert(!"Unexpected source for predicate destination");
+         emitNOP(i);
+      }
+      emitPredicate(i);
+      defId(i->def(0), 5);
+   } else
    if (i->src(0).getFile() == FILE_SYSTEM_VALUE) {
       code[0] = 0x00000002 | (getSRegEncoding(i->src(0)) << 23);
       code[1] = 0x86400000;
@@ -2335,6 +2451,9 @@ CodeEmitterGK110::emitInstruction(Instruction *insn)
       break;
    case OP_SAD:
       emitISAD(insn);
+      break;
+   case OP_SHLADD:
+      emitSHLADD(insn);
       break;
    case OP_NOT:
       emitNOT(insn);

@@ -28,6 +28,9 @@
 #include <fcntl.h>
 
 #include "anv_private.h"
+#include "util/debug.h"
+
+#include "vk_format_info.h"
 
 /**
  * Exactly one bit must be set in \a aspect.
@@ -53,26 +56,31 @@ choose_isl_surf_usage(VkImageUsageFlags vk_usage,
    if (vk_usage & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
       isl_usage |= ISL_SURF_USAGE_CUBE_BIT;
 
-   if (vk_usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-      switch (aspect) {
-      default:
-         unreachable("bad VkImageAspect");
-      case VK_IMAGE_ASPECT_DEPTH_BIT:
-         isl_usage |= ISL_SURF_USAGE_DEPTH_BIT;
-         break;
-      case VK_IMAGE_ASPECT_STENCIL_BIT:
-         isl_usage |= ISL_SURF_USAGE_STENCIL_BIT;
-         break;
-      }
+   /* Even if we're only using it for transfer operations, clears to depth and
+    * stencil images happen as depth and stencil so they need the right ISL
+    * usage bits or else things will fall apart.
+    */
+   switch (aspect) {
+   case VK_IMAGE_ASPECT_DEPTH_BIT:
+      isl_usage &= ~ISL_SURF_USAGE_DISABLE_AUX_BIT;
+      isl_usage |= ISL_SURF_USAGE_DEPTH_BIT;
+      break;
+   case VK_IMAGE_ASPECT_STENCIL_BIT:
+      isl_usage |= ISL_SURF_USAGE_STENCIL_BIT;
+      break;
+   case VK_IMAGE_ASPECT_COLOR_BIT:
+      break;
+   default:
+      unreachable("bad VkImageAspect");
    }
 
    if (vk_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-      /* Meta implements transfers by sampling from the source image. */
+      /* blorp implements transfers by sampling from the source image. */
       isl_usage |= ISL_SURF_USAGE_TEXTURE_BIT;
    }
 
    if (vk_usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
-      /* Meta implements transfers by rendering into the destination image. */
+      /* blorp implements transfers by rendering into the destination image. */
       isl_usage |= ISL_SURF_USAGE_RENDER_TARGET_BIT;
    }
 
@@ -97,6 +105,16 @@ get_surface(struct anv_image *image, VkImageAspectFlags aspect)
    }
 }
 
+static void
+add_surface(struct anv_image *image, struct anv_surface *surf)
+{
+   assert(surf->isl.size > 0); /* isl surface must be initialized */
+
+   surf->offset = align_u32(image->size, surf->isl.alignment);
+   image->size = surf->offset + surf->isl.size;
+   image->alignment = MAX2(image->alignment, surf->isl.alignment);
+}
+
 /**
  * Initialize the anv_image::*_surface selected by \a aspect. Then update the
  * image's memory requirements (that is, the image's size and alignment).
@@ -118,19 +136,30 @@ make_surface(const struct anv_device *dev,
       [VK_IMAGE_TYPE_3D] = ISL_SURF_DIM_3D,
    };
 
-   isl_tiling_flags_t tiling_flags = anv_info->isl_tiling_flags;
-   if (vk_info->tiling == VK_IMAGE_TILING_LINEAR)
-      tiling_flags = ISL_TILING_LINEAR_BIT;
+   /* Translate the Vulkan tiling to an equivalent ISL tiling, then filter the
+    * result with an optionally provided ISL tiling argument.
+    */
+   isl_tiling_flags_t tiling_flags =
+      (vk_info->tiling == VK_IMAGE_TILING_LINEAR) ?
+      ISL_TILING_LINEAR_BIT : ISL_TILING_ANY_MASK;
+
+   if (anv_info->isl_tiling_flags)
+      tiling_flags &= anv_info->isl_tiling_flags;
+
+   assert(tiling_flags);
 
    struct anv_surface *anv_surf = get_surface(image, aspect);
 
    image->extent = anv_sanitize_image_extent(vk_info->imageType,
                                              vk_info->extent);
 
+   enum isl_format format = anv_get_isl_format(&dev->info, vk_info->format,
+                                               aspect, vk_info->tiling);
+   assert(format != ISL_FORMAT_UNSUPPORTED);
+
    ok = isl_surf_init(&dev->isl_dev, &anv_surf->isl,
       .dim = vk_to_isl_surf_dim[vk_info->imageType],
-      .format = anv_get_isl_format(vk_info->format, aspect,
-                                   vk_info->tiling, NULL),
+      .format = format,
       .width = image->extent.width,
       .height = image->extent.height,
       .depth = image->extent.depth,
@@ -147,52 +176,30 @@ make_surface(const struct anv_device *dev,
     */
    assert(ok);
 
-   anv_surf->offset = align_u32(image->size, anv_surf->isl.alignment);
-   image->size = anv_surf->offset + anv_surf->isl.size;
-   image->alignment = MAX(image->alignment, anv_surf->isl.alignment);
+   add_surface(image, anv_surf);
 
-   return VK_SUCCESS;
-}
+   /* Add a HiZ surface to a depth buffer that will be used for rendering.
+    */
+   if (aspect == VK_IMAGE_ASPECT_DEPTH_BIT &&
+       (image->usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
 
-/**
- * Parameter @a format is required and overrides VkImageCreateInfo::format.
- */
-static VkImageUsageFlags
-anv_image_get_full_usage(const VkImageCreateInfo *info,
-                         const struct anv_format *format)
-{
-   VkImageUsageFlags usage = info->usage;
-
-   if (info->samples > 1 &&
-       (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
-      /* Meta will resolve the image by binding it as a texture. */
-      usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-   }
-
-   if (usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-      /* Meta will transfer from the image by binding it as a texture. */
-      usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-   }
-
-   if (usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
-      /* For non-clear transfer operations, meta will transfer to the image by
-       * binding it as a color attachment, even if the image format is not
-       * a color format.
+      /* Allow the user to control HiZ enabling. Disable by default on gen7
+       * because resolves are not currently implemented pre-BDW.
        */
-      usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-      if (anv_format_is_depth_or_stencil(format)) {
-         /* vkCmdClearDepthStencilImage() only requires that
-          * VK_IMAGE_USAGE_TRANSFER_SRC_BIT be set. In particular, it does
-          * not require VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT. Meta
-          * clears the image, though, by binding it as a depthstencil
-          * attachment.
-          */
-         usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+      if (!env_var_as_boolean("INTEL_VK_HIZ", dev->info.gen >= 8)) {
+         anv_finishme("Implement gen7 HiZ");
+      } else if (vk_info->mipLevels > 1) {
+         anv_finishme("Test multi-LOD HiZ");
+      } else if (dev->info.gen == 8 && vk_info->samples > 1) {
+         anv_finishme("Test gen8 multisampled HiZ");
+      } else {
+         isl_surf_get_hiz_surf(&dev->isl_dev, &image->depth_surface.isl,
+                               &image->hiz_surface.isl);
+         add_surface(image, &image->hiz_surface);
       }
    }
 
-   return usage;
+   return VK_SUCCESS;
 }
 
 VkResult
@@ -204,7 +211,6 @@ anv_image_create(VkDevice _device,
    ANV_FROM_HANDLE(anv_device, device, _device);
    const VkImageCreateInfo *pCreateInfo = create_info->vk_info;
    struct anv_image *image = NULL;
-   const struct anv_format *format = anv_format_for_vk_format(pCreateInfo->format);
    VkResult r;
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
@@ -216,7 +222,7 @@ anv_image_create(VkDevice _device,
    anv_assert(pCreateInfo->extent.height > 0);
    anv_assert(pCreateInfo->extent.depth > 0);
 
-   image = anv_alloc2(&device->alloc, alloc, sizeof(*image), 8,
+   image = vk_alloc2(&device->alloc, alloc, sizeof(*image), 8,
                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!image)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -225,32 +231,18 @@ anv_image_create(VkDevice _device,
    image->type = pCreateInfo->imageType;
    image->extent = pCreateInfo->extent;
    image->vk_format = pCreateInfo->format;
-   image->format = format;
+   image->aspects = vk_format_aspects(image->vk_format);
    image->levels = pCreateInfo->mipLevels;
    image->array_size = pCreateInfo->arrayLayers;
    image->samples = pCreateInfo->samples;
-   image->usage = anv_image_get_full_usage(pCreateInfo, format);
+   image->usage = pCreateInfo->usage;
    image->tiling = pCreateInfo->tiling;
 
-   if (likely(anv_format_is_color(format))) {
-      r = make_surface(device, image, create_info,
-                       VK_IMAGE_ASPECT_COLOR_BIT);
+   uint32_t b;
+   for_each_bit(b, image->aspects) {
+      r = make_surface(device, image, create_info, (1 << b));
       if (r != VK_SUCCESS)
          goto fail;
-   } else {
-      if (image->format->has_depth) {
-         r = make_surface(device, image, create_info,
-                          VK_IMAGE_ASPECT_DEPTH_BIT);
-         if (r != VK_SUCCESS)
-            goto fail;
-      }
-
-      if (image->format->has_stencil) {
-         r = make_surface(device, image, create_info,
-                          VK_IMAGE_ASPECT_STENCIL_BIT);
-         if (r != VK_SUCCESS)
-            goto fail;
-      }
    }
 
    *pImage = anv_image_to_handle(image);
@@ -259,7 +251,7 @@ anv_image_create(VkDevice _device,
 
 fail:
    if (image)
-      anv_free2(&device->alloc, alloc, image);
+      vk_free2(&device->alloc, alloc, image);
 
    return r;
 }
@@ -273,7 +265,6 @@ anv_CreateImage(VkDevice device,
    return anv_image_create(device,
       &(struct anv_image_create_info) {
          .vk_info = pCreateInfo,
-         .isl_tiling_flags = ISL_TILING_ANY_MASK,
       },
       pAllocator,
       pImage);
@@ -285,7 +276,56 @@ anv_DestroyImage(VkDevice _device, VkImage _image,
 {
    ANV_FROM_HANDLE(anv_device, device, _device);
 
-   anv_free2(&device->alloc, pAllocator, anv_image_from_handle(_image));
+   vk_free2(&device->alloc, pAllocator, anv_image_from_handle(_image));
+}
+
+VkResult anv_BindImageMemory(
+    VkDevice                                    _device,
+    VkImage                                     _image,
+    VkDeviceMemory                              _memory,
+    VkDeviceSize                                memoryOffset)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+   ANV_FROM_HANDLE(anv_device_memory, mem, _memory);
+   ANV_FROM_HANDLE(anv_image, image, _image);
+
+   if (mem) {
+      image->bo = &mem->bo;
+      image->offset = memoryOffset;
+   } else {
+      image->bo = NULL;
+      image->offset = 0;
+   }
+
+   if (anv_image_has_hiz(image)) {
+
+      /* The offset and size must be a multiple of 4K or else the
+       * anv_gem_mmap call below will return NULL.
+       */
+      assert((image->offset + image->hiz_surface.offset) % 4096 == 0);
+      assert(image->hiz_surface.isl.size % 4096 == 0);
+
+      /* HiZ surfaces need to have their memory cleared to 0 before they
+       * can be used.  If we let it have garbage data, it can cause GPU
+       * hangs on some hardware.
+       */
+      void *map = anv_gem_mmap(device, image->bo->gem_handle,
+                               image->offset + image->hiz_surface.offset,
+                               image->hiz_surface.isl.size,
+                               device->info.has_llc ? 0 : I915_MMAP_WC);
+
+      /* If anv_gem_mmap returns NULL, it's likely that the kernel was
+       * not able to find space on the host to create a proper mapping.
+       */
+      if (map == NULL)
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
+      memset(map, 0, image->hiz_surface.isl.size);
+
+      anv_gem_munmap(map, image->hiz_surface.isl.size);
+   }
+
+   return VK_SUCCESS;
 }
 
 static void
@@ -335,128 +375,47 @@ void anv_GetImageSubresourceLayout(
    }
 }
 
-VkResult
-anv_validate_CreateImageView(VkDevice _device,
-                             const VkImageViewCreateInfo *pCreateInfo,
-                             const VkAllocationCallbacks *pAllocator,
-                             VkImageView *pView)
-{
-   ANV_FROM_HANDLE(anv_image, image, pCreateInfo->image);
-   const VkImageSubresourceRange *subresource;
-   MAYBE_UNUSED const struct anv_format *view_format_info;
-
-   /* Validate structure type before dereferencing it. */
-   assert(pCreateInfo);
-   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO);
-   subresource = &pCreateInfo->subresourceRange;
-
-   /* Validate viewType is in range before using it. */
-   assert(pCreateInfo->viewType >= VK_IMAGE_VIEW_TYPE_BEGIN_RANGE);
-   assert(pCreateInfo->viewType <= VK_IMAGE_VIEW_TYPE_END_RANGE);
-
-   /* Validate format is in range before using it. */
-   assert(pCreateInfo->format >= VK_FORMAT_BEGIN_RANGE);
-   assert(pCreateInfo->format <= VK_FORMAT_END_RANGE);
-   view_format_info = anv_format_for_vk_format(pCreateInfo->format);
-
-   /* Validate channel swizzles. */
-   assert(pCreateInfo->components.r >= VK_COMPONENT_SWIZZLE_BEGIN_RANGE);
-   assert(pCreateInfo->components.r <= VK_COMPONENT_SWIZZLE_END_RANGE);
-   assert(pCreateInfo->components.g >= VK_COMPONENT_SWIZZLE_BEGIN_RANGE);
-   assert(pCreateInfo->components.g <= VK_COMPONENT_SWIZZLE_END_RANGE);
-   assert(pCreateInfo->components.b >= VK_COMPONENT_SWIZZLE_BEGIN_RANGE);
-   assert(pCreateInfo->components.b <= VK_COMPONENT_SWIZZLE_END_RANGE);
-   assert(pCreateInfo->components.a >= VK_COMPONENT_SWIZZLE_BEGIN_RANGE);
-   assert(pCreateInfo->components.a <= VK_COMPONENT_SWIZZLE_END_RANGE);
-
-   /* Validate subresource. */
-   assert(subresource->aspectMask != 0);
-   assert(subresource->levelCount > 0);
-   assert(subresource->layerCount > 0);
-   assert(subresource->baseMipLevel < image->levels);
-   assert(subresource->baseMipLevel + anv_get_levelCount(image, subresource) <= image->levels);
-   assert(subresource->baseArrayLayer < image->array_size);
-   assert(subresource->baseArrayLayer + anv_get_layerCount(image, subresource) <= image->array_size);
-   assert(pView);
-
-   const VkImageAspectFlags ds_flags = VK_IMAGE_ASPECT_DEPTH_BIT
-                                     | VK_IMAGE_ASPECT_STENCIL_BIT;
-
-   /* Validate format. */
-   if (subresource->aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-      assert(subresource->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT);
-      assert(!image->format->has_depth);
-      assert(!image->format->has_stencil);
-      assert(!view_format_info->has_depth);
-      assert(!view_format_info->has_stencil);
-      assert(view_format_info->isl_layout->bs ==
-             image->format->isl_layout->bs);
-   } else if (subresource->aspectMask & ds_flags) {
-      assert((subresource->aspectMask & ~ds_flags) == 0);
-
-      if (subresource->aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
-         assert(image->format->has_depth);
-         assert(view_format_info->has_depth);
-         assert(view_format_info->isl_layout->bs ==
-                image->format->isl_layout->bs);
-      }
-
-      if (subresource->aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
-         /* FINISHME: Is it legal to have an R8 view of S8? */
-         assert(image->format->has_stencil);
-         assert(view_format_info->has_stencil);
-      }
-   } else {
-      assert(!"bad VkImageSubresourceRange::aspectFlags");
-   }
-
-   return anv_CreateImageView(_device, pCreateInfo, pAllocator, pView);
-}
-
 static struct anv_state
-alloc_surface_state(struct anv_device *device,
-                    struct anv_cmd_buffer *cmd_buffer)
+alloc_surface_state(struct anv_device *device)
 {
-      if (cmd_buffer) {
-         return anv_cmd_buffer_alloc_surface_state(cmd_buffer);
-      } else {
-         return anv_state_pool_alloc(&device->surface_state_pool, 64, 64);
-      }
+   return anv_state_pool_alloc(&device->surface_state_pool, 64, 64);
 }
 
 static enum isl_channel_select
 remap_swizzle(VkComponentSwizzle swizzle, VkComponentSwizzle component,
-              struct anv_format_swizzle format_swizzle)
+              struct isl_swizzle format_swizzle)
 {
    if (swizzle == VK_COMPONENT_SWIZZLE_IDENTITY)
       swizzle = component;
 
    switch (swizzle) {
-   case VK_COMPONENT_SWIZZLE_ZERO:
-      return ISL_CHANNEL_SELECT_ZERO;
-   case VK_COMPONENT_SWIZZLE_ONE:
-      return ISL_CHANNEL_SELECT_ONE;
-   case VK_COMPONENT_SWIZZLE_R:
-      return ISL_CHANNEL_SELECT_RED + format_swizzle.r;
-   case VK_COMPONENT_SWIZZLE_G:
-      return ISL_CHANNEL_SELECT_RED + format_swizzle.g;
-   case VK_COMPONENT_SWIZZLE_B:
-      return ISL_CHANNEL_SELECT_RED + format_swizzle.b;
-   case VK_COMPONENT_SWIZZLE_A:
-      return ISL_CHANNEL_SELECT_RED + format_swizzle.a;
+   case VK_COMPONENT_SWIZZLE_ZERO:  return ISL_CHANNEL_SELECT_ZERO;
+   case VK_COMPONENT_SWIZZLE_ONE:   return ISL_CHANNEL_SELECT_ONE;
+   case VK_COMPONENT_SWIZZLE_R:     return format_swizzle.r;
+   case VK_COMPONENT_SWIZZLE_G:     return format_swizzle.g;
+   case VK_COMPONENT_SWIZZLE_B:     return format_swizzle.b;
+   case VK_COMPONENT_SWIZZLE_A:     return format_swizzle.a;
    default:
       unreachable("Invalid swizzle");
    }
 }
 
-void
-anv_image_view_init(struct anv_image_view *iview,
-                    struct anv_device *device,
-                    const VkImageViewCreateInfo* pCreateInfo,
-                    struct anv_cmd_buffer *cmd_buffer,
-                    VkImageUsageFlags usage_mask)
+
+VkResult
+anv_CreateImageView(VkDevice _device,
+                    const VkImageViewCreateInfo *pCreateInfo,
+                    const VkAllocationCallbacks *pAllocator,
+                    VkImageView *pView)
 {
+   ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_image, image, pCreateInfo->image);
+   struct anv_image_view *iview;
+
+   iview = vk_alloc2(&device->alloc, pAllocator, sizeof(*iview), 8,
+                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (iview == NULL)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+
    const VkImageSubresourceRange *range = &pCreateInfo->subresourceRange;
 
    assert(range->layerCount > 0);
@@ -479,7 +438,7 @@ anv_image_view_init(struct anv_image_view *iview,
       break;
    }
 
-   struct anv_surface *surface =
+   const struct anv_surface *surface =
       anv_image_get_surface_for_aspect_mask(image, range->aspectMask);
 
    iview->image = image;
@@ -489,29 +448,24 @@ anv_image_view_init(struct anv_image_view *iview,
    iview->aspect_mask = pCreateInfo->subresourceRange.aspectMask;
    iview->vk_format = pCreateInfo->format;
 
-   struct anv_format_swizzle swizzle;
-   enum isl_format format = anv_get_isl_format(pCreateInfo->format,
-                                               range->aspectMask,
-                                               image->tiling, &swizzle);
+   struct anv_format format = anv_get_format(&device->info, pCreateInfo->format,
+                                             range->aspectMask, image->tiling);
 
-   iview->base_layer = range->baseArrayLayer;
-   iview->base_mip = range->baseMipLevel;
-
-   struct isl_view isl_view = {
-      .format = format,
+   iview->isl = (struct isl_view) {
+      .format = format.isl_format,
       .base_level = range->baseMipLevel,
       .levels = anv_get_levelCount(image, range),
       .base_array_layer = range->baseArrayLayer,
       .array_len = anv_get_layerCount(image, range),
-      .channel_select = {
-         remap_swizzle(pCreateInfo->components.r,
-                       VK_COMPONENT_SWIZZLE_R, swizzle),
-         remap_swizzle(pCreateInfo->components.g,
-                       VK_COMPONENT_SWIZZLE_G, swizzle),
-         remap_swizzle(pCreateInfo->components.b,
-                       VK_COMPONENT_SWIZZLE_B, swizzle),
-         remap_swizzle(pCreateInfo->components.a,
-                       VK_COMPONENT_SWIZZLE_A, swizzle),
+      .swizzle = {
+         .r = remap_swizzle(pCreateInfo->components.r,
+                            VK_COMPONENT_SWIZZLE_R, format.swizzle),
+         .g = remap_swizzle(pCreateInfo->components.g,
+                            VK_COMPONENT_SWIZZLE_G, format.swizzle),
+         .b = remap_swizzle(pCreateInfo->components.b,
+                            VK_COMPONENT_SWIZZLE_B, format.swizzle),
+         .a = remap_swizzle(pCreateInfo->components.a,
+                            VK_COMPONENT_SWIZZLE_A, format.swizzle),
       },
    };
 
@@ -521,22 +475,27 @@ anv_image_view_init(struct anv_image_view *iview,
       .depth  = anv_minify(image->extent.depth , range->baseMipLevel),
    };
 
-   isl_surf_usage_flags_t cube_usage;
-   if (pCreateInfo->viewType == VK_IMAGE_VIEW_TYPE_CUBE ||
-       pCreateInfo->viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) {
-      cube_usage = ISL_SURF_USAGE_CUBE_BIT;
-   } else {
-      cube_usage = 0;
+   if (image->type == VK_IMAGE_TYPE_3D) {
+      iview->isl.base_array_layer = 0;
+      iview->isl.array_len = iview->extent.depth;
    }
 
-   if (image->usage & usage_mask & VK_IMAGE_USAGE_SAMPLED_BIT) {
-      iview->sampler_surface_state = alloc_surface_state(device, cmd_buffer);
+   if (pCreateInfo->viewType == VK_IMAGE_VIEW_TYPE_CUBE ||
+       pCreateInfo->viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) {
+      iview->isl.usage = ISL_SURF_USAGE_CUBE_BIT;
+   } else {
+      iview->isl.usage = 0;
+   }
 
-      isl_view.usage = cube_usage | ISL_SURF_USAGE_TEXTURE_BIT;
+   if (image->usage & VK_IMAGE_USAGE_SAMPLED_BIT) {
+      iview->sampler_surface_state = alloc_surface_state(device);
+
+      struct isl_view view = iview->isl;
+      view.usage |= ISL_SURF_USAGE_TEXTURE_BIT;
       isl_surf_fill_state(&device->isl_dev,
                           iview->sampler_surface_state.map,
                           .surf = &surface->isl,
-                          .view = &isl_view,
+                          .view = &view,
                           .mocs = device->default_mocs);
 
       if (!device->info.has_llc)
@@ -545,14 +504,15 @@ anv_image_view_init(struct anv_image_view *iview,
       iview->sampler_surface_state.alloc_size = 0;
    }
 
-   if (image->usage & usage_mask & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
-      iview->color_rt_surface_state = alloc_surface_state(device, cmd_buffer);
+   if (image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+      iview->color_rt_surface_state = alloc_surface_state(device);
 
-      isl_view.usage = cube_usage | ISL_SURF_USAGE_RENDER_TARGET_BIT;
+      struct isl_view view = iview->isl;
+      view.usage |= ISL_SURF_USAGE_RENDER_TARGET_BIT;
       isl_surf_fill_state(&device->isl_dev,
                           iview->color_rt_surface_state.map,
                           .surf = &surface->isl,
-                          .view = &isl_view,
+                          .view = &view,
                           .mocs = device->default_mocs);
 
       if (!device->info.has_llc)
@@ -561,15 +521,20 @@ anv_image_view_init(struct anv_image_view *iview,
       iview->color_rt_surface_state.alloc_size = 0;
    }
 
-   if (image->usage & usage_mask & VK_IMAGE_USAGE_STORAGE_BIT) {
-      iview->storage_surface_state = alloc_surface_state(device, cmd_buffer);
+   /* NOTE: This one needs to go last since it may stomp isl_view.format */
+   if (image->usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+      iview->storage_surface_state = alloc_surface_state(device);
 
-      if (isl_has_matching_typed_storage_image_format(&device->info, format)) {
-         isl_view.usage = cube_usage | ISL_SURF_USAGE_STORAGE_BIT;
+      if (isl_has_matching_typed_storage_image_format(&device->info,
+                                                      format.isl_format)) {
+         struct isl_view view = iview->isl;
+         view.usage |= ISL_SURF_USAGE_STORAGE_BIT;
+         view.format = isl_lower_storage_image_format(&device->info,
+                                                      format.isl_format);
          isl_surf_fill_state(&device->isl_dev,
                              iview->storage_surface_state.map,
                              .surf = &surface->isl,
-                             .view = &isl_view,
+                             .view = &view,
                              .mocs = device->default_mocs);
       } else {
          anv_fill_buffer_surface_state(device, iview->storage_surface_state,
@@ -580,32 +545,15 @@ anv_image_view_init(struct anv_image_view *iview,
 
       isl_surf_fill_image_param(&device->isl_dev,
                                 &iview->storage_image_param,
-                                &surface->isl, &isl_view);
+                                &surface->isl, &iview->isl);
 
       if (!device->info.has_llc)
          anv_state_clflush(iview->storage_surface_state);
    } else {
       iview->storage_surface_state.alloc_size = 0;
    }
-}
 
-VkResult
-anv_CreateImageView(VkDevice _device,
-                    const VkImageViewCreateInfo *pCreateInfo,
-                    const VkAllocationCallbacks *pAllocator,
-                    VkImageView *pView)
-{
-   ANV_FROM_HANDLE(anv_device, device, _device);
-   struct anv_image_view *view;
-
-   view = anv_alloc2(&device->alloc, pAllocator, sizeof(*view), 8,
-                     VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (view == NULL)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-
-   anv_image_view_init(view, device, pCreateInfo, NULL, ~0);
-
-   *pView = anv_image_view_to_handle(view);
+   *pView = anv_image_view_to_handle(iview);
 
    return VK_SUCCESS;
 }
@@ -632,39 +580,49 @@ anv_DestroyImageView(VkDevice _device, VkImageView _iview,
                           iview->storage_surface_state);
    }
 
-   anv_free2(&device->alloc, pAllocator, iview);
+   vk_free2(&device->alloc, pAllocator, iview);
 }
 
 
-void anv_buffer_view_init(struct anv_buffer_view *view,
-                          struct anv_device *device,
-                          const VkBufferViewCreateInfo* pCreateInfo,
-                          struct anv_cmd_buffer *cmd_buffer)
+VkResult
+anv_CreateBufferView(VkDevice _device,
+                     const VkBufferViewCreateInfo *pCreateInfo,
+                     const VkAllocationCallbacks *pAllocator,
+                     VkBufferView *pView)
 {
+   ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_buffer, buffer, pCreateInfo->buffer);
+   struct anv_buffer_view *view;
 
-   const struct anv_format *format =
-      anv_format_for_vk_format(pCreateInfo->format);
+   view = vk_alloc2(&device->alloc, pAllocator, sizeof(*view), 8,
+                     VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!view)
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   view->format = format->isl_format;
+   /* TODO: Handle the format swizzle? */
+
+   view->format = anv_get_isl_format(&device->info, pCreateInfo->format,
+                                     VK_IMAGE_ASPECT_COLOR_BIT,
+                                     VK_IMAGE_TILING_LINEAR);
+   const uint32_t format_bs = isl_format_get_layout(view->format)->bpb / 8;
    view->bo = buffer->bo;
    view->offset = buffer->offset + pCreateInfo->offset;
    view->range = pCreateInfo->range == VK_WHOLE_SIZE ?
-                 buffer->size - view->offset : pCreateInfo->range;
+                 buffer->size - pCreateInfo->offset : pCreateInfo->range;
+   view->range = align_down_npot_u32(view->range, format_bs);
 
    if (buffer->usage & VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT) {
-      view->surface_state = alloc_surface_state(device, cmd_buffer);
+      view->surface_state = alloc_surface_state(device);
 
       anv_fill_buffer_surface_state(device, view->surface_state,
                                     view->format,
-                                    view->offset, view->range,
-                                    format->isl_layout->bs);
+                                    view->offset, view->range, format_bs);
    } else {
       view->surface_state = (struct anv_state){ 0 };
    }
 
    if (buffer->usage & VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT) {
-      view->storage_surface_state = alloc_surface_state(device, cmd_buffer);
+      view->storage_surface_state = alloc_surface_state(device);
 
       enum isl_format storage_format =
          isl_has_matching_typed_storage_image_format(&device->info,
@@ -676,7 +634,7 @@ void anv_buffer_view_init(struct anv_buffer_view *view,
                                     storage_format,
                                     view->offset, view->range,
                                     (storage_format == ISL_FORMAT_RAW ? 1 :
-                                     format->isl_layout->bs));
+                                     isl_format_get_layout(storage_format)->bpb / 8));
 
       isl_buffer_fill_image_param(&device->isl_dev,
                                   &view->storage_image_param,
@@ -684,23 +642,6 @@ void anv_buffer_view_init(struct anv_buffer_view *view,
    } else {
       view->storage_surface_state = (struct anv_state){ 0 };
    }
-}
-
-VkResult
-anv_CreateBufferView(VkDevice _device,
-                     const VkBufferViewCreateInfo *pCreateInfo,
-                     const VkAllocationCallbacks *pAllocator,
-                     VkBufferView *pView)
-{
-   ANV_FROM_HANDLE(anv_device, device, _device);
-   struct anv_buffer_view *view;
-
-   view = anv_alloc2(&device->alloc, pAllocator, sizeof(*view), 8,
-                     VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (!view)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-
-   anv_buffer_view_init(view, device, pCreateInfo, NULL);
 
    *pView = anv_buffer_view_to_handle(view);
 
@@ -722,55 +663,41 @@ anv_DestroyBufferView(VkDevice _device, VkBufferView bufferView,
       anv_state_pool_free(&device->surface_state_pool,
                           view->storage_surface_state);
 
-   anv_free2(&device->alloc, pAllocator, view);
+   vk_free2(&device->alloc, pAllocator, view);
 }
 
-struct anv_surface *
-anv_image_get_surface_for_aspect_mask(struct anv_image *image, VkImageAspectFlags aspect_mask)
+const struct anv_surface *
+anv_image_get_surface_for_aspect_mask(const struct anv_image *image,
+                                      VkImageAspectFlags aspect_mask)
 {
    switch (aspect_mask) {
    case VK_IMAGE_ASPECT_COLOR_BIT:
-      /* Dragons will eat you.
-       *
-       * Meta attaches all destination surfaces as color render targets. Guess
-       * what surface the Meta Dragons really want.
-       */
-      if (image->format->has_depth && image->format->has_stencil) {
-         return &image->depth_surface;
-      } else if (image->format->has_depth) {
-         return &image->depth_surface;
-      } else if (image->format->has_stencil) {
-         return &image->stencil_surface;
-      } else {
-         return &image->color_surface;
-      }
-      break;
+      assert(image->aspects == VK_IMAGE_ASPECT_COLOR_BIT);
+      return &image->color_surface;
    case VK_IMAGE_ASPECT_DEPTH_BIT:
-      assert(image->format->has_depth);
+      assert(image->aspects & VK_IMAGE_ASPECT_DEPTH_BIT);
       return &image->depth_surface;
    case VK_IMAGE_ASPECT_STENCIL_BIT:
-      assert(image->format->has_stencil);
+      assert(image->aspects & VK_IMAGE_ASPECT_STENCIL_BIT);
       return &image->stencil_surface;
    case VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT:
-      if (image->format->has_depth && image->format->has_stencil) {
-         /* FINISHME: The Vulkan spec (git a511ba2) requires support for
-          * combined depth stencil formats. Specifically, it states:
-          *
-          *    At least one of ename:VK_FORMAT_D24_UNORM_S8_UINT or
-          *    ename:VK_FORMAT_D32_SFLOAT_S8_UINT must be supported.
-          *
-          * Image views with both depth and stencil aspects are only valid for
-          * render target attachments, in which case
-          * cmd_buffer_emit_depth_stencil() will pick out both the depth and
-          * stencil surfaces from the underlying surface.
-          */
+      /* FINISHME: The Vulkan spec (git a511ba2) requires support for
+       * combined depth stencil formats. Specifically, it states:
+       *
+       *    At least one of ename:VK_FORMAT_D24_UNORM_S8_UINT or
+       *    ename:VK_FORMAT_D32_SFLOAT_S8_UINT must be supported.
+       *
+       * Image views with both depth and stencil aspects are only valid for
+       * render target attachments, in which case
+       * cmd_buffer_emit_depth_stencil() will pick out both the depth and
+       * stencil surfaces from the underlying surface.
+       */
+      if (image->aspects & VK_IMAGE_ASPECT_DEPTH_BIT) {
          return &image->depth_surface;
-      } else if (image->format->has_depth) {
-         return &image->depth_surface;
-      } else if (image->format->has_stencil) {
+      } else {
+         assert(image->aspects == VK_IMAGE_ASPECT_STENCIL_BIT);
          return &image->stencil_surface;
       }
-      /* fallthrough */
     default:
        unreachable("image does not have aspect");
        return NULL;

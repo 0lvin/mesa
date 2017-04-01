@@ -41,7 +41,7 @@ vec4_visitor::emit_nir_code()
    nir_setup_system_values();
 
    /* get the main function and emit it */
-   nir_foreach_function(nir, function) {
+   nir_foreach_function(function, nir) {
       assert(strcmp(function->name, "main") == 0);
       assert(function->impl);
       nir_emit_impl(function->impl);
@@ -60,36 +60,31 @@ vec4_visitor::nir_setup_system_value_intrinsic(nir_intrinsic_instr *instr)
    case nir_intrinsic_load_vertex_id_zero_base:
       reg = &nir_system_values[SYSTEM_VALUE_VERTEX_ID_ZERO_BASE];
       if (reg->file == BAD_FILE)
-         *reg = *make_reg_for_system_value(SYSTEM_VALUE_VERTEX_ID_ZERO_BASE,
-                                           glsl_type::int_type);
+         *reg = *make_reg_for_system_value(SYSTEM_VALUE_VERTEX_ID_ZERO_BASE);
       break;
 
    case nir_intrinsic_load_base_vertex:
       reg = &nir_system_values[SYSTEM_VALUE_BASE_VERTEX];
       if (reg->file == BAD_FILE)
-         *reg = *make_reg_for_system_value(SYSTEM_VALUE_BASE_VERTEX,
-                                           glsl_type::int_type);
+         *reg = *make_reg_for_system_value(SYSTEM_VALUE_BASE_VERTEX);
       break;
 
    case nir_intrinsic_load_instance_id:
       reg = &nir_system_values[SYSTEM_VALUE_INSTANCE_ID];
       if (reg->file == BAD_FILE)
-         *reg = *make_reg_for_system_value(SYSTEM_VALUE_INSTANCE_ID,
-                                           glsl_type::int_type);
+         *reg = *make_reg_for_system_value(SYSTEM_VALUE_INSTANCE_ID);
       break;
 
    case nir_intrinsic_load_base_instance:
       reg = &nir_system_values[SYSTEM_VALUE_BASE_INSTANCE];
       if (reg->file == BAD_FILE)
-         *reg = *make_reg_for_system_value(SYSTEM_VALUE_BASE_INSTANCE,
-                                           glsl_type::int_type);
+         *reg = *make_reg_for_system_value(SYSTEM_VALUE_BASE_INSTANCE);
       break;
 
    case nir_intrinsic_load_draw_id:
       reg = &nir_system_values[SYSTEM_VALUE_DRAW_ID];
       if (reg->file == BAD_FILE)
-         *reg = *make_reg_for_system_value(SYSTEM_VALUE_DRAW_ID,
-                                           glsl_type::int_type);
+         *reg = *make_reg_for_system_value(SYSTEM_VALUE_DRAW_ID);
       break;
 
    default:
@@ -98,11 +93,9 @@ vec4_visitor::nir_setup_system_value_intrinsic(nir_intrinsic_instr *instr)
 }
 
 static bool
-setup_system_values_block(nir_block *block, void *void_visitor)
+setup_system_values_block(nir_block *block, vec4_visitor *v)
 {
-   vec4_visitor *v = (vec4_visitor *)void_visitor;
-
-   nir_foreach_instr(block, instr) {
+   nir_foreach_instr(instr, block) {
       if (instr->type != nir_instr_type_intrinsic)
          continue;
 
@@ -121,10 +114,12 @@ vec4_visitor::nir_setup_system_values()
       nir_system_values[i] = dst_reg();
    }
 
-   nir_foreach_function(nir, function) {
+   nir_foreach_function(function, nir) {
       assert(strcmp(function->name, "main") == 0);
       assert(function->impl);
-      nir_foreach_block_call(function->impl, setup_system_values_block, this);
+      nir_foreach_block(block, function->impl) {
+         setup_system_values_block(block, this);
+      }
    }
 }
 
@@ -213,7 +208,7 @@ vec4_visitor::nir_emit_loop(nir_loop *loop)
 void
 vec4_visitor::nir_emit_block(nir_block *block)
 {
-   nir_foreach_instr(block, instr) {
+   nir_foreach_instr(instr, block) {
       nir_emit_instr(instr);
    }
 }
@@ -272,7 +267,7 @@ dst_reg_for_nir_reg(vec4_visitor *v, nir_register *nir_reg,
 }
 
 dst_reg
-vec4_visitor::get_nir_dest(nir_dest dest)
+vec4_visitor::get_nir_dest(const nir_dest &dest)
 {
    if (dest.is_ssa) {
       dst_reg dst = dst_reg(VGRF, alloc.allocate(1));
@@ -285,19 +280,19 @@ vec4_visitor::get_nir_dest(nir_dest dest)
 }
 
 dst_reg
-vec4_visitor::get_nir_dest(nir_dest dest, enum brw_reg_type type)
+vec4_visitor::get_nir_dest(const nir_dest &dest, enum brw_reg_type type)
 {
    return retype(get_nir_dest(dest), type);
 }
 
 dst_reg
-vec4_visitor::get_nir_dest(nir_dest dest, nir_alu_type type)
+vec4_visitor::get_nir_dest(const nir_dest &dest, nir_alu_type type)
 {
    return get_nir_dest(dest, brw_type_for_nir_type(type));
 }
 
 src_reg
-vec4_visitor::get_nir_src(nir_src src, enum brw_reg_type type,
+vec4_visitor::get_nir_src(const nir_src &src, enum brw_reg_type type,
                           unsigned num_components)
 {
    dst_reg reg;
@@ -319,14 +314,14 @@ vec4_visitor::get_nir_src(nir_src src, enum brw_reg_type type,
 }
 
 src_reg
-vec4_visitor::get_nir_src(nir_src src, nir_alu_type type,
+vec4_visitor::get_nir_src(const nir_src &src, nir_alu_type type,
                           unsigned num_components)
 {
    return get_nir_src(src, brw_type_for_nir_type(type), num_components);
 }
 
 src_reg
-vec4_visitor::get_nir_src(nir_src src, unsigned num_components)
+vec4_visitor::get_nir_src(const nir_src &src, unsigned num_components)
 {
    /* if type is not specified, default to signed int */
    return get_nir_src(src, nir_type_int, num_components);
@@ -402,6 +397,8 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
 
       src = src_reg(ATTR, instr->const_index[0] + const_offset->u32[0],
                     glsl_type::uvec4_type);
+      /* Swizzle source based on component layout qualifier */
+      src.swizzle = BRW_SWZ_COMP_INPUT(nir_intrinsic_component(instr));
 
       dest = get_nir_dest(instr->dest, src.type);
       dest.writemask = brw_writemask_for_size(instr->num_components);
@@ -419,7 +416,14 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
       src = get_nir_src(instr->src[0], BRW_REGISTER_TYPE_F,
                         instr->num_components);
 
-      output_reg[varying] = dst_reg(src);
+      if (varying >= VARYING_SLOT_VAR0) {
+         unsigned c = nir_intrinsic_component(instr);
+         unsigned v = varying - VARYING_SLOT_VAR0;
+         output_generic_reg[v][c] = dst_reg(src);
+         output_generic_num_components[v][c] = instr->num_components;
+      } else {
+         output_reg[varying] = dst_reg(src);
+      }
       break;
    }
 
@@ -711,7 +715,7 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
          assert(const_offset->u32[0] % 4 == 0);
 
          unsigned offset = const_offset->u32[0] + shift * 4;
-         src.reg_offset = offset / 16;
+         src.offset = ROUND_DOWN_TO(offset, 16);
          shift = (offset % 16) / 4;
          src.swizzle += BRW_SWIZZLE4(shift, shift, shift, shift);
 
@@ -735,33 +739,32 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
    case nir_intrinsic_atomic_counter_dec: {
       unsigned surf_index = prog_data->base.binding_table.abo_start +
          (unsigned) instr->const_index[0];
+      const vec4_builder bld =
+         vec4_builder(this).at_end().annotate(current_annotation, base_ir);
+
+      /* Get some metadata from the image intrinsic. */
+      const nir_intrinsic_info *info = &nir_intrinsic_infos[instr->intrinsic];
+
+      /* Get the arguments of the atomic intrinsic. */
       src_reg offset = get_nir_src(instr->src[0], nir_type_int,
                                    instr->num_components);
       const src_reg surface = brw_imm_ud(surf_index);
-      const vec4_builder bld =
-         vec4_builder(this).at_end().annotate(current_annotation, base_ir);
+      const src_reg src0 = (info->num_srcs >= 2
+                           ? get_nir_src(instr->src[1]) : src_reg());
+      const src_reg src1 = (info->num_srcs >= 3
+                           ? get_nir_src(instr->src[2]) : src_reg());
+
       src_reg tmp;
 
       dest = get_nir_dest(instr->dest);
 
-      switch (instr->intrinsic) {
-      case nir_intrinsic_atomic_counter_inc:
-         tmp = emit_untyped_atomic(bld, surface, offset,
-                                   src_reg(), src_reg(),
-                                   1, 1,
-                                   BRW_AOP_INC);
-         break;
-      case nir_intrinsic_atomic_counter_dec:
-         tmp = emit_untyped_atomic(bld, surface, offset,
-                                   src_reg(), src_reg(),
-                                   1, 1,
-                                   BRW_AOP_PREDEC);
-         break;
-      case nir_intrinsic_atomic_counter_read:
+      if (instr->intrinsic == nir_intrinsic_atomic_counter_read) {
          tmp = emit_untyped_read(bld, surface, offset, 1, 1);
-         break;
-      default:
-         unreachable("Unreachable");
+      } else {
+         tmp = emit_untyped_atomic(bld, surface, offset,
+                                   src0, src1,
+                                   1, 1,
+                                   get_atomic_counter_op(instr->intrinsic));
       }
 
       bld.MOV(retype(dest, tmp.type), tmp);
@@ -835,7 +838,7 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
          vec4_builder(this).at_end().annotate(current_annotation, base_ir);
       const dst_reg tmp = bld.vgrf(BRW_REGISTER_TYPE_UD, 2);
       bld.emit(SHADER_OPCODE_MEMORY_FENCE, tmp)
-         ->regs_written = 2;
+         ->size_written = 2 * REG_SIZE;
       break;
    }
 
@@ -996,6 +999,54 @@ vec4_visitor::optimize_predicate(nir_alu_instr *instr,
             brw_conditional_for_nir_comparison(cmp_instr->op)));
 
    return true;
+}
+
+static void
+emit_find_msb_using_lzd(const vec4_builder &bld,
+                        const dst_reg &dst,
+                        const src_reg &src,
+                        bool is_signed)
+{
+   vec4_instruction *inst;
+   src_reg temp = src;
+
+   if (is_signed) {
+      /* LZD of an absolute value source almost always does the right
+       * thing.  There are two problem values:
+       *
+       * * 0x80000000.  Since abs(0x80000000) == 0x80000000, LZD returns
+       *   0.  However, findMSB(int(0x80000000)) == 30.
+       *
+       * * 0xffffffff.  Since abs(0xffffffff) == 1, LZD returns
+       *   31.  Section 8.8 (Integer Functions) of the GLSL 4.50 spec says:
+       *
+       *    For a value of zero or negative one, -1 will be returned.
+       *
+       * * Negative powers of two.  LZD(abs(-(1<<x))) returns x, but
+       *   findMSB(-(1<<x)) should return x-1.
+       *
+       * For all negative number cases, including 0x80000000 and
+       * 0xffffffff, the correct value is obtained from LZD if instead of
+       * negating the (already negative) value the logical-not is used.  A
+       * conditonal logical-not can be achieved in two instructions.
+       */
+      temp = src_reg(bld.vgrf(BRW_REGISTER_TYPE_D));
+
+      bld.ASR(dst_reg(temp), src, brw_imm_d(31));
+      bld.XOR(dst_reg(temp), temp, src);
+   }
+
+   bld.LZD(retype(dst, BRW_REGISTER_TYPE_UD),
+           retype(temp, BRW_REGISTER_TYPE_UD));
+
+   /* LZD counts from the MSB side, while GLSL's findMSB() wants the count
+    * from the LSB side. Subtract the result from 31 to convert the MSB count
+    * into an LSB count.  If no bits are set, LZD will return 32.  31-32 = -1,
+    * which is exactly what findMSB() is supposed to return.
+    */
+   inst = bld.ADD(dst, retype(src_reg(dst), BRW_REGISTER_TYPE_D),
+                  brw_imm_d(31));
+   inst->src[0].negate = true;
 }
 
 void
@@ -1466,25 +1517,57 @@ vec4_visitor::nir_emit_alu(nir_alu_instr *instr)
       break;
 
    case nir_op_ufind_msb:
+      emit_find_msb_using_lzd(vec4_builder(this).at_end(), dst, op[0], false);
+      break;
+
    case nir_op_ifind_msb: {
-      emit(FBH(retype(dst, BRW_REGISTER_TYPE_UD), op[0]));
-
-      /* FBH counts from the MSB side, while GLSL's findMSB() wants the count
-       * from the LSB side. If FBH didn't return an error (0xFFFFFFFF), then
-       * subtract the result from 31 to convert the MSB count into an LSB count.
-       */
+      vec4_builder bld = vec4_builder(this).at_end();
       src_reg src(dst);
-      emit(CMP(dst_null_d(), src, brw_imm_d(-1), BRW_CONDITIONAL_NZ));
 
-      inst = emit(ADD(dst, src, brw_imm_d(31)));
-      inst->predicate = BRW_PREDICATE_NORMAL;
-      inst->src[0].negate = true;
+      if (devinfo->gen < 7) {
+         emit_find_msb_using_lzd(bld, dst, op[0], true);
+      } else {
+         emit(FBH(retype(dst, BRW_REGISTER_TYPE_UD), op[0]));
+
+         /* FBH counts from the MSB side, while GLSL's findMSB() wants the
+          * count from the LSB side. If FBH didn't return an error
+          * (0xFFFFFFFF), then subtract the result from 31 to convert the MSB
+          * count into an LSB count.
+          */
+         bld.CMP(dst_null_d(), src, brw_imm_d(-1), BRW_CONDITIONAL_NZ);
+
+         inst = bld.ADD(dst, src, brw_imm_d(31));
+         inst->predicate = BRW_PREDICATE_NORMAL;
+         inst->src[0].negate = true;
+      }
       break;
    }
 
-   case nir_op_find_lsb:
-      emit(FBL(dst, op[0]));
+   case nir_op_find_lsb: {
+      vec4_builder bld = vec4_builder(this).at_end();
+
+      if (devinfo->gen < 7) {
+         dst_reg temp = bld.vgrf(BRW_REGISTER_TYPE_D);
+
+         /* (x & -x) generates a value that consists of only the LSB of x.
+          * For all powers of 2, findMSB(y) == findLSB(y).
+          */
+         src_reg src = src_reg(retype(op[0], BRW_REGISTER_TYPE_D));
+         src_reg negated_src = src;
+
+         /* One must be negated, and the other must be non-negated.  It
+          * doesn't matter which is which.
+          */
+         negated_src.negate = true;
+         src.negate = false;
+
+         bld.AND(temp, src, negated_src);
+         emit_find_msb_using_lzd(bld, dst, src_reg(temp), false);
+      } else {
+         bld.FBL(dst, op[0]);
+      }
       break;
+   }
 
    case nir_op_ubitfield_extract:
    case nir_op_ibitfield_extract:
@@ -1880,17 +1963,11 @@ vec4_visitor::nir_emit_texture(nir_tex_instr *instr)
 
    ir_texture_opcode op = ir_texture_opcode_for_nir_texop(instr->op);
 
-   bool is_cube_array =
-      instr->op == nir_texop_txs &&
-      instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
-      instr->is_array;
-
    emit_texture(op, dest, dest_type, coordinate, instr->coord_components,
                 shadow_comparitor,
                 lod, lod2, sample_index,
-                constant_offset, offset_value,
-                mcs, is_cube_array,
-                texture, texture_reg, sampler, sampler_reg);
+                constant_offset, offset_value, mcs,
+                texture, texture_reg, sampler_reg);
 }
 
 void

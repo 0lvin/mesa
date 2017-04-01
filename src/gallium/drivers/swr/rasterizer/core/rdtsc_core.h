@@ -82,11 +82,14 @@ enum CORE_BUCKETS
     BEBarycentric,
     BEEarlyDepthTest,
     BEPixelShader,
+    BESingleSampleBackend,
+    BEPixelRateBackend,
+    BESampleRateBackend,
+    BENullBackend,
     BELateDepthTest,
     BEOutputMerger,
     BEStoreTiles,
     BEEndTile,
-    WorkerWaitForThreadEvent,
 
     NumBuckets
 };
@@ -118,24 +121,25 @@ extern std::vector<uint32_t> gBucketMap;
 extern BucketManager gBucketMgr;
 extern BUCKET_DESC gCoreBuckets[];
 extern uint32_t gCurrentFrame;
+extern bool gBucketsInitialized;
 
 INLINE void rdtscReset()
 {
     gCurrentFrame = 0;
     gBucketMgr.ClearThreads();
-    gBucketMgr.ClearBuckets();
 }
 
 INLINE void rdtscInit(int threadId)
 {
     // register all the buckets once
-    if (threadId == 0)
+    if (!gBucketsInitialized && (threadId == 0))
     {
         gBucketMap.resize(NumBuckets);
         for (uint32_t i = 0; i < NumBuckets; ++i)
         {
             gBucketMap[i] = gBucketMgr.RegisterBucket(gCoreBuckets[i]);
         }
+        gBucketsInitialized = true;
     }
 
     std::string name = threadId == 0 ? "API" : "WORKER";
@@ -164,12 +168,12 @@ INLINE void rdtscEndFrame()
 {
     gCurrentFrame++;
 
-    if (gCurrentFrame == KNOB_BUCKETS_START_FRAME)
+    if (gCurrentFrame == KNOB_BUCKETS_START_FRAME && KNOB_BUCKETS_START_FRAME < KNOB_BUCKETS_END_FRAME)
     {
         gBucketMgr.StartCapture();
     }
 
-    if (gCurrentFrame == KNOB_BUCKETS_END_FRAME)
+    if (gCurrentFrame == KNOB_BUCKETS_END_FRAME && KNOB_BUCKETS_START_FRAME < KNOB_BUCKETS_END_FRAME)
     {
         gBucketMgr.StopCapture();
         gBucketMgr.PrintReport("rdtsc.txt");

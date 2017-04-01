@@ -149,8 +149,8 @@ struct vtn_block {
    /** Points to the switch case started by this block (if any) */
    struct vtn_case *switch_case;
 
-   /** The last block in this SPIR-V block. */
-   nir_block *end_block;
+   /** Every block ends in a nop intrinsic so that we can find it again */
+   nir_intrinsic_instr *end_nop;
 };
 
 struct vtn_function {
@@ -378,6 +378,7 @@ struct vtn_builder {
    const char *entry_point_name;
    struct vtn_value *entry_point;
    bool origin_upper_left;
+   bool pixel_center_integer;
 
    struct vtn_function *func;
    struct exec_list functions;
@@ -415,6 +416,9 @@ vtn_value(struct vtn_builder *b, uint32_t value_id,
    assert(val->value_type == value_type);
    return val;
 }
+
+void _vtn_warn(const char *file, int line, const char *msg, ...);
+#define vtn_warn(...) _vtn_warn(__FILE__, __LINE__, __VA_ARGS__)
 
 struct vtn_ssa_value *vtn_ssa_value(struct vtn_builder *b, uint32_t value_id);
 

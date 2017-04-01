@@ -81,6 +81,11 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CBindingWrapping.h>
 
+#include <llvm/Config/llvm-config.h>
+#if LLVM_USE_INTEL_JITEVENTS
+#include <llvm/ExecutionEngine/JITEventListener.h>
+#endif
+
 // Workaround http://llvm.org/PR23628
 #if HAVE_LLVM >= 0x0307
 #  pragma pop_macro("DEBUG")
@@ -110,7 +115,7 @@ static LLVMEnsureMultithreaded lLVMEnsureMultithreaded;
 
 }
 
-static once_flag init_native_targets_once_flag;
+static once_flag init_native_targets_once_flag = ONCE_FLAG_INIT;
 
 static void init_native_targets()
 {
@@ -565,7 +570,28 @@ lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT,
     */
    MAttrs.push_back(util_cpu_caps.has_avx  ? "+avx"  : "-avx");
    MAttrs.push_back(util_cpu_caps.has_f16c ? "+f16c" : "-f16c");
+   if (HAVE_LLVM >= 0x0304) {
+      MAttrs.push_back(util_cpu_caps.has_fma  ? "+fma"  : "-fma");
+   } else {
+      /*
+       * The old JIT in LLVM 3.3 has a bug encoding llvm.fmuladd.f32 and
+       * llvm.fmuladd.v2f32 intrinsics when FMA is available.
+       */
+      MAttrs.push_back("-fma");
+   }
    MAttrs.push_back(util_cpu_caps.has_avx2 ? "+avx2" : "-avx2");
+   /* disable avx512 and all subvariants */
+#if HAVE_LLVM >= 0x0304
+   MAttrs.push_back("-avx512cd");
+   MAttrs.push_back("-avx512er");
+   MAttrs.push_back("-avx512f");
+   MAttrs.push_back("-avx512pf");
+#endif
+#if HAVE_LLVM >= 0x0305
+   MAttrs.push_back("-avx512bw");
+   MAttrs.push_back("-avx512dq");
+   MAttrs.push_back("-avx512vl");
+#endif
 #endif
 
 #if defined(PIPE_ARCH_PPC)
@@ -629,6 +655,10 @@ lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT,
    ExecutionEngine *JIT;
 
    JIT = builder.create();
+#if LLVM_USE_INTEL_JITEVENTS
+   JITEventListener *JEL = JITEventListener::createIntelJITEventListener();
+   JIT->RegisterJITEventListener(JEL);
+#endif
    if (JIT) {
       *OutJIT = wrap(JIT);
       return 0;
@@ -666,4 +696,15 @@ void
 lp_free_memory_manager(LLVMMCJITMemoryManagerRef memorymgr)
 {
    delete reinterpret_cast<BaseMemoryManager*>(memorymgr);
+}
+
+extern "C" void
+lp_add_attr_dereferenceable(LLVMValueRef val, uint64_t bytes)
+{
+#if HAVE_LLVM >= 0x0306
+   llvm::Argument *A = llvm::unwrap<llvm::Argument>(val);
+   llvm::AttrBuilder B;
+   B.addDereferenceableAttr(bytes);
+   A->addAttr(llvm::AttributeSet::get(A->getContext(), A->getArgNo() + 1,  B));
+#endif
 }

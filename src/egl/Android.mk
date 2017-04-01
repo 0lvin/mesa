@@ -43,13 +43,6 @@ LOCAL_CFLAGS := \
 	-D_EGL_BUILT_IN_DRIVER_DRI2 \
 	-DHAVE_ANDROID_PLATFORM
 
-ifeq ($(MESA_LOLLIPOP_BUILD),true)
-LOCAL_CFLAGS_32 := -DDEFAULT_DRIVER_DIR=\"/system/lib/$(MESA_DRI_MODULE_REL_PATH)\"
-LOCAL_CFLAGS_64 := -DDEFAULT_DRIVER_DIR=\"/system/lib64/$(MESA_DRI_MODULE_REL_PATH)\"
-else
-LOCAL_CFLAGS += -DDEFAULT_DRIVER_DIR=\"/system/lib/$(MESA_DRI_MODULE_REL_PATH)\"
-endif
-
 LOCAL_C_INCLUDES := \
 	$(MESA_TOP)/src/egl/main \
 	$(MESA_TOP)/src/egl/drivers/dri2 \
@@ -66,12 +59,6 @@ LOCAL_SHARED_LIBRARIES := \
 
 ifeq ($(shell echo "$(MESA_ANDROID_VERSION) >= 4.2" | bc),1)
 LOCAL_SHARED_LIBRARIES += libsync
-endif
-
-# add libdrm if there are hardware drivers
-ifneq ($(filter-out swrast,$(MESA_GPU_DRIVERS)),)
-LOCAL_CFLAGS += -DHAVE_LIBDRM
-LOCAL_SHARED_LIBRARIES += libdrm
 endif
 
 ifeq ($(strip $(MESA_BUILD_CLASSIC)),true)

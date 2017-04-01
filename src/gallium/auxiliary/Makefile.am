@@ -34,6 +34,8 @@ libgallium_la_SOURCES += \
 
 endif
 
+libgallium_la_LDFLAGS = $(LIBSENSORS_LDFLAGS)
+
 MKDIR_GEN = $(AM_V_at)$(MKDIR_P) $(@D)
 PYTHON_GEN =  $(AM_V_GEN)$(PYTHON2) $(PYTHON_FLAGS)
 
@@ -81,6 +83,13 @@ libgalliumvlwinsys_la_CFLAGS = \
 
 libgalliumvlwinsys_la_SOURCES = \
 	$(VL_WINSYS_SOURCES)
+
+if HAVE_DRI3
+
+libgalliumvlwinsys_la_SOURCES += \
+	$(VL_WINSYS_DRI3_SOURCES)
+
+endif
 
 endif
 

@@ -39,7 +39,7 @@ get_image_offset(const struct softpipe_resource *spr,
    int base_layer = 0;
 
    if (spr->base.target == PIPE_BUFFER)
-      return iview->u.buf.first_element * util_format_get_blocksize(format);
+      return iview->u.buf.offset;
 
    if (spr->base.target == PIPE_TEXTURE_1D_ARRAY ||
        spr->base.target == PIPE_TEXTURE_2D_ARRAY ||
@@ -153,7 +153,7 @@ get_dimensions(const struct pipe_image_view *iview,
                unsigned *depth)
 {
    if (tgsi_tex_instr == TGSI_TEXTURE_BUFFER) {
-      *width = iview->u.buf.last_element - iview->u.buf.first_element + 1;
+      *width = iview->u.buf.size / util_format_get_blocksize(pformat);
       *height = 1;
       *depth = 1;
       /*
@@ -607,6 +607,42 @@ handle_op_int(const struct pipe_image_view *iview,
                         s, t, 1, 1);
 }
 
+/* GLES OES_shader_image_atomic.txt allows XCHG on R32F */
+static void
+handle_op_r32f_xchg(const struct pipe_image_view *iview,
+                    const struct tgsi_image_params *params,
+                    bool just_read,
+                    char *data_ptr,
+                    uint qi,
+                    unsigned stride,
+                    unsigned opcode,
+                    int s,
+                    int t,
+                    float rgba[TGSI_NUM_CHANNELS][TGSI_QUAD_SIZE])
+{
+   float sdata[4];
+   uint c;
+   int nc = 1;
+   util_format_read_4f(params->format,
+                       sdata, 0,
+                       data_ptr, stride,
+                       s, t, 1, 1);
+   if (just_read) {
+      for (c = 0; c < nc; c++) {
+         ((int32_t *)rgba[c])[qi] = sdata[c];
+      }
+      return;
+   }
+
+   for (c = 0; c < nc; c++) {
+      int temp = sdata[c];
+      sdata[c] = ((float *)rgba[c])[qi];
+      ((float *)rgba[c])[qi] = temp;
+   }
+   util_format_write_4f(params->format, sdata, 0, data_ptr, stride,
+                        s, t, 1, 1);
+}
+
 /*
  * Implement atomic image operations.
  */
@@ -682,6 +718,10 @@ sp_tgsi_op(const struct tgsi_image *image,
       else if (util_format_is_pure_sint(params->format))
          handle_op_int(iview, params, just_read, data_ptr, j, stride,
                        opcode, s_coord, t_coord, rgba, rgba2);
+      else if (params->format == PIPE_FORMAT_R32_FLOAT &&
+               opcode == TGSI_OPCODE_ATOMXCHG)
+         handle_op_r32f_xchg(iview, params, just_read, data_ptr, j, stride,
+                             opcode, s_coord, t_coord, rgba);
       else
          assert(0);
    }
@@ -712,7 +752,7 @@ sp_tgsi_get_dims(const struct tgsi_image *image,
       return;
 
    if (params->tgsi_tex_instr == TGSI_TEXTURE_BUFFER) {
-      dims[0] = iview->u.buf.last_element - iview->u.buf.first_element + 1;
+      dims[0] = iview->u.buf.size / util_format_get_blocksize(iview->format);
       dims[1] = dims[2] = dims[3] = 0;
       return;
    }

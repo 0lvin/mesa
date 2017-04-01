@@ -161,7 +161,7 @@ nir_variable_create(nir_shader *shader, nir_variable_mode mode,
 
    if ((mode == nir_var_shader_in && shader->stage != MESA_SHADER_VERTEX) ||
        (mode == nir_var_shader_out && shader->stage != MESA_SHADER_FRAGMENT))
-      var->data.interpolation = INTERP_QUALIFIER_SMOOTH;
+      var->data.interpolation = INTERP_MODE_SMOOTH;
 
    if (mode == nir_var_shader_in || mode == nir_var_uniform)
       var->data.read_only = true;
@@ -536,6 +536,22 @@ nir_tex_instr_create(nir_shader *shader, unsigned num_srcs)
    return instr;
 }
 
+void
+nir_tex_instr_remove_src(nir_tex_instr *tex, unsigned src_idx)
+{
+   assert(src_idx < tex->num_srcs);
+
+   /* First rewrite the source to NIR_SRC_INIT */
+   nir_instr_rewrite_src(&tex->instr, &tex->src[src_idx].src, NIR_SRC_INIT);
+
+   /* Now, move all of the other sources down */
+   for (unsigned i = src_idx + 1; i < tex->num_srcs; i++) {
+      tex->src[i-1].src_type = tex->src[i].src_type;
+      nir_instr_move_src(&tex->instr, &tex->src[i-1].src, &tex->src[i].src);
+   }
+   tex->num_srcs--;
+}
+
 nir_phi_instr *
 nir_phi_instr_create(nir_shader *shader)
 {
@@ -642,6 +658,9 @@ copy_deref_struct(void *mem_ctx, nir_deref_struct *deref)
 nir_deref *
 nir_copy_deref(void *mem_ctx, nir_deref *deref)
 {
+   if (deref == NULL)
+      return NULL;
+
    switch (deref->deref_type) {
    case nir_deref_type_var:
       return &copy_deref_var(mem_ctx, nir_deref_as_var(deref))->deref;
@@ -654,6 +673,122 @@ nir_copy_deref(void *mem_ctx, nir_deref *deref)
    }
 
    return NULL;
+}
+
+/* This is the second step in the recursion.  We've found the tail and made a
+ * copy.  Now we need to iterate over all possible leaves and call the
+ * callback on each one.
+ */
+static bool
+deref_foreach_leaf_build_recur(nir_deref_var *deref, nir_deref *tail,
+                               nir_deref_foreach_leaf_cb cb, void *state)
+{
+   unsigned length;
+   union {
+      nir_deref_array arr;
+      nir_deref_struct str;
+   } tmp;
+
+   assert(tail->child == NULL);
+   switch (glsl_get_base_type(tail->type)) {
+   case GLSL_TYPE_UINT:
+   case GLSL_TYPE_INT:
+   case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_DOUBLE:
+   case GLSL_TYPE_BOOL:
+      if (glsl_type_is_vector_or_scalar(tail->type))
+         return cb(deref, state);
+      /* Fall Through */
+
+   case GLSL_TYPE_ARRAY:
+      tmp.arr.deref.deref_type = nir_deref_type_array;
+      tmp.arr.deref.type = glsl_get_array_element(tail->type);
+      tmp.arr.deref_array_type = nir_deref_array_type_direct;
+      tmp.arr.indirect = NIR_SRC_INIT;
+      tail->child = &tmp.arr.deref;
+
+      length = glsl_get_length(tail->type);
+      for (unsigned i = 0; i < length; i++) {
+         tmp.arr.deref.child = NULL;
+         tmp.arr.base_offset = i;
+         if (!deref_foreach_leaf_build_recur(deref, &tmp.arr.deref, cb, state))
+            return false;
+      }
+      return true;
+
+   case GLSL_TYPE_STRUCT:
+      tmp.str.deref.deref_type = nir_deref_type_struct;
+      tail->child = &tmp.str.deref;
+
+      length = glsl_get_length(tail->type);
+      for (unsigned i = 0; i < length; i++) {
+         tmp.arr.deref.child = NULL;
+         tmp.str.deref.type = glsl_get_struct_field(tail->type, i);
+         tmp.str.index = i;
+         if (!deref_foreach_leaf_build_recur(deref, &tmp.arr.deref, cb, state))
+            return false;
+      }
+      return true;
+
+   default:
+      unreachable("Invalid type for dereference");
+   }
+}
+
+/* This is the first step of the foreach_leaf recursion.  In this step we are
+ * walking to the end of the deref chain and making a copy in the stack as we
+ * go.  This is because we don't want to mutate the deref chain that was
+ * passed in by the caller.  The downside is that this deref chain is on the
+ * stack and , if the caller wants to do anything with it, they will have to
+ * make their own copy because this one will go away.
+ */
+static bool
+deref_foreach_leaf_copy_recur(nir_deref_var *deref, nir_deref *tail,
+                              nir_deref_foreach_leaf_cb cb, void *state)
+{
+   union {
+      nir_deref_array arr;
+      nir_deref_struct str;
+   } c;
+
+   if (tail->child) {
+      switch (tail->child->deref_type) {
+      case nir_deref_type_array:
+         c.arr = *nir_deref_as_array(tail->child);
+         tail->child = &c.arr.deref;
+         return deref_foreach_leaf_copy_recur(deref, &c.arr.deref, cb, state);
+
+      case nir_deref_type_struct:
+         c.str = *nir_deref_as_struct(tail->child);
+         tail->child = &c.str.deref;
+         return deref_foreach_leaf_copy_recur(deref, &c.str.deref, cb, state);
+
+      case nir_deref_type_var:
+      default:
+         unreachable("Invalid deref type for a child");
+      }
+   } else {
+      /* We've gotten to the end of the original deref.  Time to start
+       * building our own derefs.
+       */
+      return deref_foreach_leaf_build_recur(deref, tail, cb, state);
+   }
+}
+
+/**
+ * This function iterates over all of the possible derefs that can be created
+ * with the given deref as the head.  It then calls the provided callback with
+ * a full deref for each one.
+ *
+ * The deref passed to the callback will be allocated on the stack.  You will
+ * need to make a copy if you want it to hang around.
+ */
+bool
+nir_deref_foreach_leaf(nir_deref_var *deref,
+                       nir_deref_foreach_leaf_cb cb, void *state)
+{
+   nir_deref_var copy = *deref;
+   return deref_foreach_leaf_copy_recur(&copy, &copy.deref, cb, state);
 }
 
 /* Returns a load_const instruction that represents the constant
@@ -694,7 +829,7 @@ nir_deref_get_const_initializer_load(nir_shader *shader, nir_deref_var *deref)
       tail = tail->child;
    }
 
-   unsigned bit_size = glsl_get_bit_size(glsl_get_base_type(tail->type));
+   unsigned bit_size = glsl_get_bit_size(tail->type);
    nir_load_const_instr *load =
       nir_load_const_instr_create(shader, glsl_get_vector_elements(tail->type),
                                   bit_size);
@@ -893,6 +1028,8 @@ src_is_valid(const nir_src *src)
 static bool
 remove_use_cb(nir_src *src, void *state)
 {
+   (void) state;
+
    if (src_is_valid(src))
       list_del(&src->use_link);
 
@@ -902,6 +1039,8 @@ remove_use_cb(nir_src *src, void *state)
 static bool
 remove_def_cb(nir_dest *dest, void *state)
 {
+   (void) state;
+
    if (!dest->is_ssa)
       list_del(&dest->reg.def_link);
 
@@ -981,7 +1120,7 @@ static bool
 visit_parallel_copy_dest(nir_parallel_copy_instr *instr,
                          nir_foreach_dest_cb cb, void *state)
 {
-   nir_foreach_parallel_copy_entry(instr, entry) {
+   nir_foreach_parallel_copy_entry(entry, instr) {
       if (!cb(&entry->dest, state))
          return false;
    }
@@ -1147,22 +1286,9 @@ visit_intrinsic_src(nir_intrinsic_instr *instr, nir_foreach_src_cb cb,
 }
 
 static bool
-visit_call_src(nir_call_instr *instr, nir_foreach_src_cb cb, void *state)
-{
-   return true;
-}
-
-static bool
-visit_load_const_src(nir_load_const_instr *instr, nir_foreach_src_cb cb,
-                     void *state)
-{
-   return true;
-}
-
-static bool
 visit_phi_src(nir_phi_instr *instr, nir_foreach_src_cb cb, void *state)
 {
-   nir_foreach_phi_src(instr, src) {
+   nir_foreach_phi_src(src, instr) {
       if (!visit_src(&src->src, cb, state))
          return false;
    }
@@ -1174,7 +1300,7 @@ static bool
 visit_parallel_copy_src(nir_parallel_copy_instr *instr,
                         nir_foreach_src_cb cb, void *state)
 {
-   nir_foreach_parallel_copy_entry(instr, entry) {
+   nir_foreach_parallel_copy_entry(entry, instr) {
       if (!visit_src(&entry->src, cb, state))
          return false;
    }
@@ -1215,12 +1341,10 @@ nir_foreach_src(nir_instr *instr, nir_foreach_src_cb cb, void *state)
          return false;
       break;
    case nir_instr_type_call:
-      if (!visit_call_src(nir_instr_as_call(instr), cb, state))
-         return false;
+      /* Call instructions have no regular sources */
       break;
    case nir_instr_type_load_const:
-      if (!visit_load_const_src(nir_instr_as_load_const(instr), cb, state))
-         return false;
+      /* Constant load instructions have no regular sources */
       break;
    case nir_instr_type_phi:
       if (!visit_phi_src(nir_instr_as_phi(instr), cb, state))
@@ -1419,10 +1543,10 @@ nir_ssa_def_rewrite_uses(nir_ssa_def *def, nir_src new_src)
 {
    assert(!new_src.is_ssa || def != new_src.ssa);
 
-   nir_foreach_use_safe(def, use_src)
+   nir_foreach_use_safe(use_src, def)
       nir_instr_rewrite_src(use_src->parent_instr, use_src, new_src);
 
-   nir_foreach_if_use_safe(def, use_src)
+   nir_foreach_if_use_safe(use_src, def)
       nir_if_rewrite_condition(use_src->parent_if, new_src);
 }
 
@@ -1462,7 +1586,7 @@ nir_ssa_def_rewrite_uses_after(nir_ssa_def *def, nir_src new_src,
 {
    assert(!new_src.is_ssa || def != new_src.ssa);
 
-   nir_foreach_use_safe(def, use_src) {
+   nir_foreach_use_safe(use_src, def) {
       assert(use_src->parent_instr != def->parent_instr);
       /* Since def already dominates all of its uses, the only way a use can
        * not be dominated by after_me is if it is between def and after_me in
@@ -1472,7 +1596,7 @@ nir_ssa_def_rewrite_uses_after(nir_ssa_def *def, nir_src new_src,
          nir_instr_rewrite_src(use_src->parent_instr, use_src, new_src);
    }
 
-   nir_foreach_if_use_safe(def, use_src)
+   nir_foreach_if_use_safe(use_src, def)
       nir_if_rewrite_condition(use_src->parent_if, new_src);
 }
 
@@ -1480,7 +1604,7 @@ uint8_t
 nir_ssa_def_components_read(nir_ssa_def *def)
 {
    uint8_t read_mask = 0;
-   nir_foreach_use(def, use) {
+   nir_foreach_use(use, def) {
       if (use->parent_instr->type == nir_instr_type_alu) {
          nir_alu_instr *alu = nir_instr_as_alu(use->parent_instr);
          nir_alu_src *alu_src = exec_node_data(nir_alu_src, use, src);
@@ -1501,109 +1625,143 @@ nir_ssa_def_components_read(nir_ssa_def *def)
    return read_mask;
 }
 
-static bool foreach_cf_node(nir_cf_node *node, nir_foreach_block_cb cb,
-                            bool reverse, void *state);
-
-static inline bool
-foreach_if(nir_if *if_stmt, nir_foreach_block_cb cb, bool reverse, void *state)
+nir_block *
+nir_block_cf_tree_next(nir_block *block)
 {
-   if (reverse) {
-      foreach_list_typed_reverse_safe(nir_cf_node, node, node,
-                                      &if_stmt->else_list) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
-
-      foreach_list_typed_reverse_safe(nir_cf_node, node, node,
-                                      &if_stmt->then_list) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
-   } else {
-      foreach_list_typed_safe(nir_cf_node, node, node, &if_stmt->then_list) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
-
-      foreach_list_typed_safe(nir_cf_node, node, node, &if_stmt->else_list) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
+   if (block == NULL) {
+      /* nir_foreach_block_safe() will call this function on a NULL block
+       * after the last iteration, but it won't use the result so just return
+       * NULL here.
+       */
+      return NULL;
    }
 
-   return true;
-}
+   nir_cf_node *cf_next = nir_cf_node_next(&block->cf_node);
+   if (cf_next)
+      return nir_cf_node_cf_tree_first(cf_next);
 
-static inline bool
-foreach_loop(nir_loop *loop, nir_foreach_block_cb cb, bool reverse, void *state)
-{
-   if (reverse) {
-      foreach_list_typed_reverse_safe(nir_cf_node, node, node, &loop->body) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
-   } else {
-      foreach_list_typed_safe(nir_cf_node, node, node, &loop->body) {
-         if (!foreach_cf_node(node, cb, reverse, state))
-            return false;
-      }
+   nir_cf_node *parent = block->cf_node.parent;
+
+   switch (parent->type) {
+   case nir_cf_node_if: {
+      /* Are we at the end of the if? Go to the beginning of the else */
+      nir_if *if_stmt = nir_cf_node_as_if(parent);
+      if (block == nir_if_last_then_block(if_stmt))
+         return nir_if_first_else_block(if_stmt);
+
+      assert(block == nir_if_last_else_block(if_stmt));
+      /* fall through */
    }
 
-   return true;
-}
-
-static bool
-foreach_cf_node(nir_cf_node *node, nir_foreach_block_cb cb,
-                bool reverse, void *state)
-{
-   switch (node->type) {
-   case nir_cf_node_block:
-      return cb(nir_cf_node_as_block(node), state);
-   case nir_cf_node_if:
-      return foreach_if(nir_cf_node_as_if(node), cb, reverse, state);
    case nir_cf_node_loop:
-      return foreach_loop(nir_cf_node_as_loop(node), cb, reverse, state);
-      break;
+      return nir_cf_node_as_block(nir_cf_node_next(parent));
+
+   case nir_cf_node_function:
+      return NULL;
 
    default:
-      unreachable("Invalid CFG node type");
-      break;
+      unreachable("unknown cf node type");
    }
-
-   return false;
 }
 
-bool
-nir_foreach_block_in_cf_node_call(nir_cf_node *node, nir_foreach_block_cb cb,
-                             void *state)
+nir_block *
+nir_block_cf_tree_prev(nir_block *block)
 {
-   return foreach_cf_node(node, cb, false, state);
-}
-
-bool
-nir_foreach_block_call(nir_function_impl *impl, nir_foreach_block_cb cb, void *state)
-{
-   foreach_list_typed_safe(nir_cf_node, node, node, &impl->body) {
-      if (!foreach_cf_node(node, cb, false, state))
-         return false;
+   if (block == NULL) {
+      /* do this for consistency with nir_block_cf_tree_next() */
+      return NULL;
    }
 
-   return cb(impl->end_block, state);
-}
+   nir_cf_node *cf_prev = nir_cf_node_prev(&block->cf_node);
+   if (cf_prev)
+      return nir_cf_node_cf_tree_last(cf_prev);
 
-bool
-nir_foreach_block_reverse_call(nir_function_impl *impl, nir_foreach_block_cb cb,
-                          void *state)
-{
-   if (!cb(impl->end_block, state))
-      return false;
+   nir_cf_node *parent = block->cf_node.parent;
 
-   foreach_list_typed_reverse_safe(nir_cf_node, node, node, &impl->body) {
-      if (!foreach_cf_node(node, cb, true, state))
-         return false;
+   switch (parent->type) {
+   case nir_cf_node_if: {
+      /* Are we at the beginning of the else? Go to the end of the if */
+      nir_if *if_stmt = nir_cf_node_as_if(parent);
+      if (block == nir_if_first_else_block(if_stmt))
+         return nir_if_last_then_block(if_stmt);
+
+      assert(block == nir_if_first_then_block(if_stmt));
+      /* fall through */
    }
 
-   return true;
+   case nir_cf_node_loop:
+      return nir_cf_node_as_block(nir_cf_node_prev(parent));
+
+   case nir_cf_node_function:
+      return NULL;
+
+   default:
+      unreachable("unknown cf node type");
+   }
+}
+
+nir_block *nir_cf_node_cf_tree_first(nir_cf_node *node)
+{
+   switch (node->type) {
+   case nir_cf_node_function: {
+      nir_function_impl *impl = nir_cf_node_as_function(node);
+      return nir_start_block(impl);
+   }
+
+   case nir_cf_node_if: {
+      nir_if *if_stmt = nir_cf_node_as_if(node);
+      return nir_if_first_then_block(if_stmt);
+   }
+
+   case nir_cf_node_loop: {
+      nir_loop *loop = nir_cf_node_as_loop(node);
+      return nir_loop_first_block(loop);
+   }
+
+   case nir_cf_node_block: {
+      return nir_cf_node_as_block(node);
+   }
+
+   default:
+      unreachable("unknown node type");
+   }
+}
+
+nir_block *nir_cf_node_cf_tree_last(nir_cf_node *node)
+{
+   switch (node->type) {
+   case nir_cf_node_function: {
+      nir_function_impl *impl = nir_cf_node_as_function(node);
+      return nir_impl_last_block(impl);
+   }
+
+   case nir_cf_node_if: {
+      nir_if *if_stmt = nir_cf_node_as_if(node);
+      return nir_if_last_else_block(if_stmt);
+   }
+
+   case nir_cf_node_loop: {
+      nir_loop *loop = nir_cf_node_as_loop(node);
+      return nir_loop_last_block(loop);
+   }
+
+   case nir_cf_node_block: {
+      return nir_cf_node_as_block(node);
+   }
+
+   default:
+      unreachable("unknown node type");
+   }
+}
+
+nir_block *nir_cf_node_cf_tree_next(nir_cf_node *node)
+{
+   if (node->type == nir_cf_node_block)
+      return nir_cf_node_cf_tree_first(nir_cf_node_next(node));
+   else if (node->type == nir_cf_node_function)
+      return NULL;
+   else
+      return nir_cf_node_as_block(nir_cf_node_next(node));
 }
 
 nir_if *
@@ -1639,13 +1797,6 @@ nir_block_get_following_loop(nir_block *block)
 
    return nir_cf_node_as_loop(next_node);
 }
-static bool
-index_block(nir_block *block, void *state)
-{
-   unsigned *index = state;
-   block->index = (*index)++;
-   return true;
-}
 
 void
 nir_index_blocks(nir_function_impl *impl)
@@ -1655,7 +1806,9 @@ nir_index_blocks(nir_function_impl *impl)
    if (impl->valid_metadata & nir_metadata_block_index)
       return;
 
-   nir_foreach_block_call(impl, index_block, &index);
+   nir_foreach_block(block, impl) {
+      block->index = index++;
+   }
 
    impl->num_blocks = index;
 }
@@ -1669,15 +1822,6 @@ index_ssa_def_cb(nir_ssa_def *def, void *state)
    return true;
 }
 
-static bool
-index_ssa_block(nir_block *block, void *state)
-{
-   nir_foreach_instr(block, instr)
-      nir_foreach_ssa_def(instr, index_ssa_def_cb, state);
-
-   return true;
-}
-
 /**
  * The indices are applied top-to-bottom which has the very nice property
  * that, if A dominates B, then A->index <= B->index.
@@ -1686,18 +1830,13 @@ void
 nir_index_ssa_defs(nir_function_impl *impl)
 {
    unsigned index = 0;
-   nir_foreach_block_call(impl, index_ssa_block, &index);
+
+   nir_foreach_block(block, impl) {
+      nir_foreach_instr(instr, block)
+         nir_foreach_ssa_def(instr, index_ssa_def_cb, &index);
+   }
+
    impl->ssa_alloc = index;
-}
-
-static bool
-index_instrs_block(nir_block *block, void *state)
-{
-   unsigned *index = state;
-   nir_foreach_instr(block, instr)
-      instr->index = (*index)++;
-
-   return true;
 }
 
 /**
@@ -1708,7 +1847,12 @@ unsigned
 nir_index_instrs(nir_function_impl *impl)
 {
    unsigned index = 0;
-   nir_foreach_block_call(impl, index_instrs_block, &index);
+
+   nir_foreach_block(block, impl) {
+      nir_foreach_instr(instr, block)
+         instr->index = index++;
+   }
+
    return index;
 }
 
@@ -1740,6 +1884,8 @@ nir_intrinsic_from_system_value(gl_system_value val)
       return nir_intrinsic_load_sample_mask_in;
    case SYSTEM_VALUE_LOCAL_INVOCATION_ID:
       return nir_intrinsic_load_local_invocation_id;
+   case SYSTEM_VALUE_LOCAL_INVOCATION_INDEX:
+      return nir_intrinsic_load_local_invocation_index;
    case SYSTEM_VALUE_WORK_GROUP_ID:
       return nir_intrinsic_load_work_group_id;
    case SYSTEM_VALUE_NUM_WORK_GROUPS:
@@ -1789,6 +1935,8 @@ nir_system_value_from_intrinsic(nir_intrinsic_op intrin)
       return SYSTEM_VALUE_SAMPLE_MASK_IN;
    case nir_intrinsic_load_local_invocation_id:
       return SYSTEM_VALUE_LOCAL_INVOCATION_ID;
+   case nir_intrinsic_load_local_invocation_index:
+      return SYSTEM_VALUE_LOCAL_INVOCATION_INDEX;
    case nir_intrinsic_load_num_work_groups:
       return SYSTEM_VALUE_NUM_WORK_GROUPS;
    case nir_intrinsic_load_work_group_id:

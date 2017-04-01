@@ -176,14 +176,14 @@ softpipe_compute_vertex_info(struct softpipe_context *softpipe)
             /*
              * Note that we'd actually want to skip position (as we won't use
              * the attribute in the fs) but can't. The reason is that we don't
-             * actually have a input/output map for setup (even though it looks
+             * actually have an input/output map for setup (even though it looks
              * like we do...). Could adjust for this though even without a map.
              */
          } else {
             /*
              * Note that we'd actually want to skip position (as we won't use
              * the attribute in the fs) but can't. The reason is that we don't
-             * actually have a input/output map for setup (even though it looks
+             * actually have an input/output map for setup (even though it looks
              * like we do...). Could adjust for this though even without a map.
              */
             draw_emit_vertex_attr(vinfo, EMIT_4F, vs_index);
@@ -313,7 +313,7 @@ update_tgsi_samplers( struct softpipe_context *softpipe )
    }
 
    /* XXX is this really necessary here??? */
-   for (sh = 0; sh < Elements(softpipe->tex_cache); sh++) {
+   for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
       for (i = 0; i < PIPE_MAX_SAMPLERS; i++) {
          struct softpipe_tex_tile_cache *tc = softpipe->tex_cache[sh][i];
          if (tc && tc->texture) {

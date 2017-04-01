@@ -178,7 +178,7 @@ void trace_dump_poly_stipple(const struct pipe_poly_stipple *state)
    trace_dump_member_begin("stipple");
    trace_dump_array(uint,
                     state->stipple,
-                    Elements(state->stipple));
+                    ARRAY_SIZE(state->stipple));
    trace_dump_member_end();
 
    trace_dump_struct_end();
@@ -361,7 +361,7 @@ void trace_dump_depth_stencil_alpha_state(const struct pipe_depth_stencil_alpha_
 
    trace_dump_member_begin("stencil");
    trace_dump_array_begin();
-   for(i = 0; i < Elements(state->stencil); ++i) {
+   for(i = 0; i < ARRAY_SIZE(state->stencil); ++i) {
       trace_dump_elem_begin();
       trace_dump_struct_begin("pipe_stencil_state");
       trace_dump_member(bool, &state->stencil[i], enabled);
@@ -543,8 +543,8 @@ void trace_dump_sampler_view_template(const struct pipe_sampler_view *state,
    if (target == PIPE_BUFFER) {
       trace_dump_member_begin("buf");
       trace_dump_struct_begin(""); /* anonymous */
-      trace_dump_member(uint, &state->u.buf, first_element);
-      trace_dump_member(uint, &state->u.buf, last_element);
+      trace_dump_member(uint, &state->u.buf, offset);
+      trace_dump_member(uint, &state->u.buf, size);
       trace_dump_struct_end(); /* anonymous */
       trace_dump_member_end(); /* buf */
    } else {
@@ -760,8 +760,8 @@ void trace_dump_image_view(const struct pipe_image_view *state)
    if (state->resource->target == PIPE_BUFFER) {
       trace_dump_member_begin("buf");
       trace_dump_struct_begin(""); /* anonymous */
-      trace_dump_member(uint, &state->u.buf, first_element);
-      trace_dump_member(uint, &state->u.buf, last_element);
+      trace_dump_member(uint, &state->u.buf, offset);
+      trace_dump_member(uint, &state->u.buf, size);
       trace_dump_struct_end(); /* anonymous */
       trace_dump_member_end(); /* buf */
    } else {
@@ -955,11 +955,11 @@ void trace_dump_grid_info(const struct pipe_grid_info *state)
    trace_dump_member(ptr, state, input);
 
    trace_dump_member_begin("block");
-   trace_dump_array(uint, state->block, Elements(state->block));
+   trace_dump_array(uint, state->block, ARRAY_SIZE(state->block));
    trace_dump_member_end();
 
    trace_dump_member_begin("grid");
-   trace_dump_array(uint, state->grid, Elements(state->grid));
+   trace_dump_array(uint, state->grid, ARRAY_SIZE(state->grid));
    trace_dump_member_end();
 
    trace_dump_member(ptr, state, indirect);

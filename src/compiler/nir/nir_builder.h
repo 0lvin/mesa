@@ -88,10 +88,11 @@ nir_ssa_undef(nir_builder *build, unsigned num_components, unsigned bit_size)
 }
 
 static inline nir_ssa_def *
-nir_build_imm(nir_builder *build, unsigned num_components, nir_const_value value)
+nir_build_imm(nir_builder *build, unsigned num_components,
+              unsigned bit_size, nir_const_value value)
 {
    nir_load_const_instr *load_const =
-      nir_load_const_instr_create(build->shader, num_components, 32);
+      nir_load_const_instr_create(build->shader, num_components, bit_size);
    if (!load_const)
       return NULL;
 
@@ -110,7 +111,18 @@ nir_imm_float(nir_builder *build, float x)
    memset(&v, 0, sizeof(v));
    v.f32[0] = x;
 
-   return nir_build_imm(build, 1, v);
+   return nir_build_imm(build, 1, 32, v);
+}
+
+static inline nir_ssa_def *
+nir_imm_double(nir_builder *build, double x)
+{
+   nir_const_value v;
+
+   memset(&v, 0, sizeof(v));
+   v.f64[0] = x;
+
+   return nir_build_imm(build, 1, 64, v);
 }
 
 static inline nir_ssa_def *
@@ -124,7 +136,7 @@ nir_imm_vec4(nir_builder *build, float x, float y, float z, float w)
    v.f32[2] = z;
    v.f32[3] = w;
 
-   return nir_build_imm(build, 4, v);
+   return nir_build_imm(build, 4, 32, v);
 }
 
 static inline nir_ssa_def *
@@ -135,7 +147,7 @@ nir_imm_int(nir_builder *build, int x)
    memset(&v, 0, sizeof(v));
    v.i32[0] = x;
 
-   return nir_build_imm(build, 1, v);
+   return nir_build_imm(build, 1, 32, v);
 }
 
 static inline nir_ssa_def *
@@ -149,7 +161,7 @@ nir_imm_ivec4(nir_builder *build, int x, int y, int z, int w)
    v.i32[2] = z;
    v.i32[3] = w;
 
-   return nir_build_imm(build, 4, v);
+   return nir_build_imm(build, 4, 32, v);
 }
 
 static inline nir_ssa_def *
@@ -219,36 +231,6 @@ nir_build_alu(nir_builder *build, nir_op op, nir_ssa_def *src0,
    nir_builder_instr_insert(build, &instr->instr);
 
    return &instr->dest.dest.ssa;
-}
-
-#define ALU1(op)                                                          \
-static inline nir_ssa_def *                                               \
-nir_##op(nir_builder *build, nir_ssa_def *src0)                           \
-{                                                                         \
-   return nir_build_alu(build, nir_op_##op, src0, NULL, NULL, NULL);      \
-}
-
-#define ALU2(op)                                                          \
-static inline nir_ssa_def *                                               \
-nir_##op(nir_builder *build, nir_ssa_def *src0, nir_ssa_def *src1)        \
-{                                                                         \
-   return nir_build_alu(build, nir_op_##op, src0, src1, NULL, NULL);      \
-}
-
-#define ALU3(op)                                                          \
-static inline nir_ssa_def *                                               \
-nir_##op(nir_builder *build, nir_ssa_def *src0,                           \
-         nir_ssa_def *src1, nir_ssa_def *src2)                            \
-{                                                                         \
-   return nir_build_alu(build, nir_op_##op, src0, src1, src2, NULL);      \
-}
-
-#define ALU4(op)                                                          \
-static inline nir_ssa_def *                                               \
-nir_##op(nir_builder *build, nir_ssa_def *src0,                           \
-         nir_ssa_def *src1, nir_ssa_def *src2, nir_ssa_def *src3)         \
-{                                                                         \
-   return nir_build_alu(build, nir_op_##op, src0, src1, src2, src3);      \
 }
 
 #include "nir_builder_opcodes.h"
@@ -336,10 +318,43 @@ nir_fdot(nir_builder *build, nir_ssa_def *src0, nir_ssa_def *src1)
 }
 
 static inline nir_ssa_def *
+nir_bany_inequal(nir_builder *b, nir_ssa_def *src0, nir_ssa_def *src1)
+{
+   switch (src0->num_components) {
+   case 1: return nir_ine(b, src0, src1);
+   case 2: return nir_bany_inequal2(b, src0, src1);
+   case 3: return nir_bany_inequal3(b, src0, src1);
+   case 4: return nir_bany_inequal4(b, src0, src1);
+   default:
+      unreachable("bad component size");
+   }
+}
+
+static inline nir_ssa_def *
+nir_bany(nir_builder *b, nir_ssa_def *src)
+{
+   return nir_bany_inequal(b, src, nir_imm_int(b, 0));
+}
+
+static inline nir_ssa_def *
 nir_channel(nir_builder *b, nir_ssa_def *def, unsigned c)
 {
    unsigned swizzle[4] = {c, c, c, c};
    return nir_swizzle(b, def, swizzle, 1, false);
+}
+
+static inline nir_ssa_def *
+nir_channels(nir_builder *b, nir_ssa_def *def, unsigned mask)
+{
+   unsigned num_channels = 0, swizzle[4] = { 0, 0, 0, 0 };
+
+   for (unsigned i = 0; i < 4; i++) {
+      if ((mask & (1 << i)) == 0)
+         continue;
+      swizzle[num_channels++] = i;
+   }
+
+   return nir_swizzle(b, def, swizzle, num_channels, false);
 }
 
 /**
@@ -391,7 +406,7 @@ nir_load_var(nir_builder *build, nir_variable *var)
    load->num_components = num_components;
    load->variables[0] = nir_deref_var_create(load, var);
    nir_ssa_dest_init(&load->instr, &load->dest, num_components,
-                     glsl_get_bit_size(glsl_get_base_type(var->type)), NULL);
+                     glsl_get_bit_size(var->type), NULL);
    nir_builder_instr_insert(build, &load->instr);
    return &load->dest.ssa;
 }
@@ -450,6 +465,7 @@ nir_copy_var(nir_builder *build, nir_variable *dest, nir_variable *src)
    nir_builder_instr_insert(build, &copy->instr);
 }
 
+/* Generic builder for system values. */
 static inline nir_ssa_def *
 nir_load_system_value(nir_builder *build, nir_intrinsic_op op, int index)
 {
@@ -460,6 +476,31 @@ nir_load_system_value(nir_builder *build, nir_intrinsic_op op, int index)
                      nir_intrinsic_infos[op].dest_components, 32, NULL);
    nir_builder_instr_insert(build, &load->instr);
    return &load->dest.ssa;
+}
+
+/* Generate custom builders for system values. */
+#define INTRINSIC(name, num_srcs, src_components, has_dest, dest_components, \
+                  num_variables, num_indices, idx0, idx1, idx2, flags)
+#define LAST_INTRINSIC(name)
+
+#define DEFINE_SYSTEM_VALUE(name)                                        \
+   static inline nir_ssa_def *                                           \
+   nir_load_##name(nir_builder *build)                                   \
+   {                                                                     \
+      return nir_load_system_value(build, nir_intrinsic_load_##name, 0); \
+   }                                                                     \
+
+#include "nir_intrinsics.h"
+
+static inline nir_ssa_def *
+nir_load_barycentric(nir_builder *build, nir_intrinsic_op op,
+                     unsigned interp_mode)
+{
+   nir_intrinsic_instr *bary = nir_intrinsic_instr_create(build->shader, op);
+   nir_ssa_dest_init(&bary->instr, &bary->dest, 2, 32, NULL);
+   nir_intrinsic_set_interp_mode(bary, interp_mode);
+   nir_builder_instr_insert(build, &bary->instr);
+   return &bary->dest.ssa;
 }
 
 static inline void

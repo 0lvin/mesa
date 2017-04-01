@@ -27,6 +27,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "util/mesa-sha1.h"
+
 #include "anv_private.h"
 
 /*
@@ -56,7 +58,7 @@ VkResult anv_CreateDescriptorSetLayout(
                  (max_binding + 1) * sizeof(set_layout->binding[0]) +
                  immutable_sampler_count * sizeof(struct anv_sampler *);
 
-   set_layout = anv_alloc2(&device->alloc, pAllocator, size, 8,
+   set_layout = vk_alloc2(&device->alloc, pAllocator, size, 8,
                            VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!set_layout)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -65,14 +67,14 @@ VkResult anv_CreateDescriptorSetLayout(
    struct anv_sampler **samplers =
       (struct anv_sampler **)&set_layout->binding[max_binding + 1];
 
+   memset(set_layout, 0, sizeof(*set_layout));
    set_layout->binding_count = max_binding + 1;
-   set_layout->shader_stages = 0;
-   set_layout->size = 0;
 
    for (uint32_t b = 0; b <= max_binding; b++) {
       /* Initialize all binding_layout entries to -1 */
       memset(&set_layout->binding[b], -1, sizeof(set_layout->binding[b]));
 
+      set_layout->binding[b].array_size = 0;
       set_layout->binding[b].immutable_samplers = NULL;
    }
 
@@ -88,8 +90,24 @@ VkResult anv_CreateDescriptorSetLayout(
    for (uint32_t j = 0; j < pCreateInfo->bindingCount; j++) {
       const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[j];
       uint32_t b = binding->binding;
+      /* We temporarily store the pointer to the binding in the
+       * immutable_samplers pointer.  This provides us with a quick-and-dirty
+       * way to sort the bindings by binding number.
+       */
+      set_layout->binding[b].immutable_samplers = (void *)binding;
+   }
+
+   for (uint32_t b = 0; b <= max_binding; b++) {
+      const VkDescriptorSetLayoutBinding *binding =
+         (void *)set_layout->binding[b].immutable_samplers;
+
+      if (binding == NULL)
+         continue;
 
       assert(binding->descriptorCount > 0);
+#ifndef NDEBUG
+      set_layout->binding[b].type = binding->descriptorType;
+#endif
       set_layout->binding[b].array_size = binding->descriptorCount;
       set_layout->binding[b].descriptor_index = set_layout->size;
       set_layout->size += binding->descriptorCount;
@@ -182,7 +200,16 @@ void anv_DestroyDescriptorSetLayout(
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_descriptor_set_layout, set_layout, _set_layout);
 
-   anv_free2(&device->alloc, pAllocator, set_layout);
+   vk_free2(&device->alloc, pAllocator, set_layout);
+}
+
+static void
+sha1_update_descriptor_set_layout(struct mesa_sha1 *ctx,
+                                  const struct anv_descriptor_set_layout *layout)
+{
+   size_t size = sizeof(*layout) +
+                 sizeof(layout->binding[0]) * layout->binding_count;
+   _mesa_sha1_update(ctx, layout, size);
 }
 
 /*
@@ -201,7 +228,7 @@ VkResult anv_CreatePipelineLayout(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
 
-   layout = anv_alloc2(&device->alloc, pAllocator, sizeof(*layout), 8,
+   layout = vk_alloc2(&device->alloc, pAllocator, sizeof(*layout), 8,
                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (layout == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -229,6 +256,19 @@ VkResult anv_CreatePipelineLayout(
       }
    }
 
+   struct mesa_sha1 *ctx = _mesa_sha1_init();
+   for (unsigned s = 0; s < layout->num_sets; s++) {
+      sha1_update_descriptor_set_layout(ctx, layout->set[s].layout);
+      _mesa_sha1_update(ctx, &layout->set[s].dynamic_offset_start,
+                        sizeof(layout->set[s].dynamic_offset_start));
+   }
+   _mesa_sha1_update(ctx, &layout->num_sets, sizeof(layout->num_sets));
+   for (unsigned s = 0; s < MESA_SHADER_STAGES; s++) {
+      _mesa_sha1_update(ctx, &layout->stage[s].has_dynamic_offsets,
+                        sizeof(layout->stage[s].has_dynamic_offsets));
+   }
+   _mesa_sha1_final(ctx, layout->sha1);
+
    *pPipelineLayout = anv_pipeline_layout_to_handle(layout);
 
    return VK_SUCCESS;
@@ -242,7 +282,7 @@ void anv_DestroyPipelineLayout(
    ANV_FROM_HANDLE(anv_device, device, _device);
    ANV_FROM_HANDLE(anv_pipeline_layout, pipeline_layout, _pipelineLayout);
 
-   anv_free2(&device->alloc, pAllocator, pipeline_layout);
+   vk_free2(&device->alloc, pAllocator, pipeline_layout);
 }
 
 /*
@@ -289,7 +329,7 @@ VkResult anv_CreateDescriptorPool(
       descriptor_count * sizeof(struct anv_descriptor) +
       buffer_count * sizeof(struct anv_buffer_view);
 
-   pool = anv_alloc2(&device->alloc, pAllocator, size, 8,
+   pool = vk_alloc2(&device->alloc, pAllocator, size, 8,
                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!pool)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -316,7 +356,7 @@ void anv_DestroyDescriptorPool(
    ANV_FROM_HANDLE(anv_descriptor_pool, pool, _pool);
 
    anv_state_stream_finish(&pool->surface_state_stream);
-   anv_free2(&device->alloc, pAllocator, pool);
+   vk_free2(&device->alloc, pAllocator, pool);
 }
 
 VkResult anv_ResetDescriptorPool(
@@ -391,6 +431,11 @@ anv_descriptor_set_create(struct anv_device *device,
    set->buffer_views =
       (struct anv_buffer_view *) &set->descriptors[layout->size];
    set->buffer_count = layout->buffer_count;
+
+   /* By defining the descriptors to be zero now, we can later verify that
+    * a descriptor has not been populated with user data.
+    */
+   memset(set->descriptors, 0, sizeof(struct anv_descriptor) * layout->size);
 
    /* Go through and fill out immutable samplers if we have any */
    struct anv_descriptor *desc = set->descriptors;
@@ -525,6 +570,8 @@ void anv_UpdateDescriptorSets(
          &set->descriptors[bind_layout->descriptor_index];
       desc += write->dstArrayElement;
 
+      assert(write->descriptorType == bind_layout->type);
+
       switch (write->descriptorType) {
       case VK_DESCRIPTOR_TYPE_SAMPLER:
          for (uint32_t j = 0; j < write->descriptorCount; j++) {
@@ -599,10 +646,8 @@ void anv_UpdateDescriptorSets(
                &set->buffer_views[bind_layout->buffer_index];
             view += write->dstArrayElement + j;
 
-            const struct anv_format *format =
-               anv_format_for_descriptor_type(write->descriptorType);
-
-            view->format = format->isl_format;
+            view->format =
+               anv_isl_format_for_descriptor_type(write->descriptorType);
             view->bo = buffer->bo;
             view->offset = buffer->offset + write->pBufferInfo[j].offset;
 

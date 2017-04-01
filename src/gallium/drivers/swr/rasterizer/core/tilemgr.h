@@ -95,6 +95,7 @@ struct MacroTileQueue
     ///@todo This will all be private.
     uint32_t mWorkItemsFE = 0;
     uint32_t mWorkItemsBE = 0;
+    uint32_t mId = 0;
 
 private:
     QUEUE<BE_WORK> mFifo;
@@ -123,8 +124,7 @@ public:
         mDirtyTiles.clear();
     }
 
-    INLINE std::vector<uint32_t>& getDirtyTiles() { return mDirtyTiles; }
-    INLINE MacroTileQueue& getMacroTileQueue(uint32_t id) { return mTiles[id]; }
+    INLINE std::vector<MacroTileQueue*>& getDirtyTiles() { return mDirtyTiles; }
     void markTileComplete(uint32_t id);
 
     INLINE bool isWorkComplete()
@@ -145,11 +145,13 @@ private:
     std::unordered_map<uint32_t, MacroTileQueue> mTiles;
 
     // Any tile that has work queued to it is a dirty tile.
-    std::vector<uint32_t> mDirtyTiles;
+    std::vector<MacroTileQueue*> mDirtyTiles;
 
     OSALIGNLINE(LONG) mWorkItemsProduced { 0 };
     OSALIGNLINE(volatile LONG) mWorkItemsConsumed { 0 };
 };
+
+typedef void(*PFN_DISPATCH)(DRAW_CONTEXT* pDC, uint32_t workerId, uint32_t threadGroupId, void*& pSpillFillBuffer);
 
 //////////////////////////////////////////////////////////////////////////
 /// DispatchQueue - work queue for dispatch
@@ -161,7 +163,7 @@ public:
 
     //////////////////////////////////////////////////////////////////////////
     /// @brief Setup the producer consumer counts.
-    void initialize(uint32_t totalTasks, void* pTaskData)
+    void initialize(uint32_t totalTasks, void* pTaskData, PFN_DISPATCH pfnDispatch)
     {
         // The available and outstanding counts start with total tasks.
         // At the start there are N tasks available and outstanding.
@@ -173,6 +175,7 @@ public:
         mTasksOutstanding = totalTasks;
 
         mpTaskData = pTaskData;
+        mPfnDispatch = pfnDispatch;
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -226,7 +229,16 @@ public:
         return mpTaskData;
     }
 
+    //////////////////////////////////////////////////////////////////////////
+    /// @brief Dispatches a unit of work
+    void dispatch(DRAW_CONTEXT* pDC, uint32_t workerId, uint32_t threadGroupId, void*& pSpillFillBuffer)
+    {
+        SWR_ASSERT(mPfnDispatch != nullptr);
+        mPfnDispatch(pDC, workerId, threadGroupId, pSpillFillBuffer);
+    }
+
     void* mpTaskData{ nullptr };        // The API thread will set this up and the callback task function will interpet this.
+    PFN_DISPATCH mPfnDispatch{ nullptr };      // Function to call per dispatch
 
     OSALIGNLINE(volatile LONG) mTasksAvailable{ 0 };
     OSALIGNLINE(volatile LONG) mTasksOutstanding{ 0 };
@@ -291,7 +303,7 @@ public:
         }
     }
 
-    void InitializeHotTiles(SWR_CONTEXT* pContext, DRAW_CONTEXT* pDC, uint32_t macroID);
+    void InitializeHotTiles(SWR_CONTEXT* pContext, DRAW_CONTEXT* pDC, uint32_t workerId, uint32_t macroID);
 
     HOTTILE *GetHotTile(SWR_CONTEXT* pContext, DRAW_CONTEXT* pDC, uint32_t macroID, SWR_RENDERTARGET_ATTACHMENT attachment, bool create, uint32_t numSamples = 1,
         uint32_t renderTargetArrayIndex = 0);
@@ -313,7 +325,7 @@ private:
         HANDLE hProcess = GetCurrentProcess();
         p = VirtualAllocExNuma(hProcess, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE, numaNode);
 #else
-        p = _aligned_malloc(size, align);
+        p = AlignedMalloc(size, align);
 #endif
 
         return p;
@@ -326,7 +338,7 @@ private:
 #if defined(_WIN32)
             VirtualFree(pBuffer, 0, MEM_RELEASE);
 #else
-            _aligned_free(pBuffer);
+            AlignedFree(pBuffer);
 #endif
         }
     }

@@ -40,13 +40,13 @@ extern "C" {
 struct glsl_type;
 #endif
 
-void glsl_print_type(const struct glsl_type *type, FILE *fp);
-void glsl_print_struct(const struct glsl_type *type, FILE *fp);
+const char *glsl_get_type_name(const struct glsl_type *type);
 
 const struct glsl_type *glsl_get_struct_field(const struct glsl_type *type,
                                               unsigned index);
 
 const struct glsl_type *glsl_get_array_element(const struct glsl_type *type);
+const struct glsl_type *glsl_without_array(const struct glsl_type *type);
 
 const struct glsl_type *glsl_get_column_type(const struct glsl_type *type);
 
@@ -81,9 +81,9 @@ unsigned glsl_get_record_location_offset(const struct glsl_type *type,
                                          unsigned length);
 
 static inline unsigned
-glsl_get_bit_size(enum glsl_base_type type)
+glsl_get_bit_size(const struct glsl_type *type)
 {
-   switch (type) {
+   switch (glsl_get_base_type(type)) {
    case GLSL_TYPE_INT:
    case GLSL_TYPE_UINT:
    case GLSL_TYPE_BOOL:
@@ -116,7 +116,9 @@ bool glsl_sampler_type_is_array(const struct glsl_type *type);
 
 const struct glsl_type *glsl_void_type(void);
 const struct glsl_type *glsl_float_type(void);
+const struct glsl_type *glsl_double_type(void);
 const struct glsl_type *glsl_vec_type(unsigned n);
+const struct glsl_type *glsl_dvec_type(unsigned n);
 const struct glsl_type *glsl_vec4_type(void);
 const struct glsl_type *glsl_int_type(void);
 const struct glsl_type *glsl_uint_type(void);

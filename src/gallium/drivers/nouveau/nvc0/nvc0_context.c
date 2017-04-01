@@ -90,17 +90,24 @@ nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
                nvc0->cb_dirty = true;
          }
       }
+   } else {
+      /* Pretty much any writing by shaders needs a serialize after
+       * it. Especially when moving between 3d and compute pipelines, but even
+       * without that.
+       */
+      IMMED_NVC0(push, NVC0_3D(SERIALIZE), 0);
    }
 
-   if (flags & (PIPE_BARRIER_SHADER_BUFFER   |
-                PIPE_BARRIER_CONSTANT_BUFFER |
-                PIPE_BARRIER_INDEX_BUFFER    |
-                PIPE_BARRIER_IMAGE           |
-                PIPE_BARRIER_TEXTURE         |
-                PIPE_BARRIER_VERTEX_BUFFER   |
-                PIPE_BARRIER_STREAMOUT_BUFFER)) {
-      IMMED_NVC0(push, NVC0_3D(MEM_BARRIER), 0x1011);
-   }
+   /* If we're going to texture from a buffer/image written by a shader, we
+    * must flush the texture cache.
+    */
+   if (flags & PIPE_BARRIER_TEXTURE)
+      IMMED_NVC0(push, NVC0_3D(TEX_CACHE_CTL), 0);
+
+   if (flags & PIPE_BARRIER_CONSTANT_BUFFER)
+      nvc0->cb_dirty = true;
+   if (flags & (PIPE_BARRIER_VERTEX_BUFFER | PIPE_BARRIER_INDEX_BUFFER))
+      nvc0->base.vbo_dirty = true;
 }
 
 static void
@@ -150,16 +157,21 @@ nvc0_context_unreference_resources(struct nvc0_context *nvc0)
       for (i = 0; i < NVC0_MAX_PIPE_CONSTBUFS; ++i)
          if (!nvc0->constbuf[s][i].user)
             pipe_resource_reference(&nvc0->constbuf[s][i].u.buf, NULL);
+
+      for (i = 0; i < NVC0_MAX_BUFFERS; ++i)
+         pipe_resource_reference(&nvc0->buffers[s][i].buffer, NULL);
+
+      for (i = 0; i < NVC0_MAX_IMAGES; ++i) {
+         pipe_resource_reference(&nvc0->images[s][i].resource, NULL);
+         if (nvc0->screen->base.class_3d >= GM107_3D_CLASS)
+            pipe_sampler_view_reference(&nvc0->images_tic[s][i], NULL);
+      }
    }
 
    for (s = 0; s < 2; ++s) {
       for (i = 0; i < NVC0_MAX_SURFACE_SLOTS; ++i)
          pipe_surface_reference(&nvc0->surfaces[s][i], NULL);
    }
-
-   for (s = 0; s < 6; ++s)
-      for (i = 0; i < NVC0_MAX_BUFFERS; ++i)
-         pipe_resource_reference(&nvc0->buffers[s][i].buffer, NULL);
 
    for (i = 0; i < nvc0->num_tfbbufs; ++i)
       pipe_so_target_reference(&nvc0->tfbbuf[i], NULL);
@@ -259,71 +271,76 @@ nvc0_invalidate_resource_storage(struct nouveau_context *ctx,
             return ref;
       }
 
-      for (s = 0; s < 5; ++s) {
-      for (i = 0; i < nvc0->num_textures[s]; ++i) {
-         if (nvc0->textures[s][i] &&
-             nvc0->textures[s][i]->texture == res) {
-            nvc0->textures_dirty[s] |= 1 << i;
-            nvc0->dirty_3d |= NVC0_NEW_3D_TEXTURES;
-            nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEX(s, i));
-            if (!--ref)
-               return ref;
+      for (s = 0; s < 6; ++s) {
+         for (i = 0; i < nvc0->num_textures[s]; ++i) {
+            if (nvc0->textures[s][i] &&
+                nvc0->textures[s][i]->texture == res) {
+               nvc0->textures_dirty[s] |= 1 << i;
+               if (unlikely(s == 5)) {
+                  nvc0->dirty_cp |= NVC0_NEW_CP_TEXTURES;
+                  nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_TEX(i));
+               } else {
+                  nvc0->dirty_3d |= NVC0_NEW_3D_TEXTURES;
+                  nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEX(s, i));
+               }
+               if (!--ref)
+                  return ref;
+            }
          }
-      }
       }
 
       for (s = 0; s < 6; ++s) {
-      for (i = 0; i < NVC0_MAX_PIPE_CONSTBUFS; ++i) {
-         if (!(nvc0->constbuf_valid[s] & (1 << i)))
-            continue;
-         if (!nvc0->constbuf[s][i].user &&
-             nvc0->constbuf[s][i].u.buf == res) {
-            nvc0->constbuf_dirty[s] |= 1 << i;
-            if (unlikely(s == 5)) {
-               nvc0->dirty_cp |= NVC0_NEW_CP_CONSTBUF;
-               nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_CB(i));
-            } else {
-               nvc0->dirty_3d |= NVC0_NEW_3D_CONSTBUF;
-               nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_CB(s, i));
+         for (i = 0; i < NVC0_MAX_PIPE_CONSTBUFS; ++i) {
+            if (!(nvc0->constbuf_valid[s] & (1 << i)))
+               continue;
+            if (!nvc0->constbuf[s][i].user &&
+                nvc0->constbuf[s][i].u.buf == res) {
+               nvc0->constbuf_dirty[s] |= 1 << i;
+               if (unlikely(s == 5)) {
+                  nvc0->dirty_cp |= NVC0_NEW_CP_CONSTBUF;
+                  nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_CB(i));
+               } else {
+                  nvc0->dirty_3d |= NVC0_NEW_3D_CONSTBUF;
+                  nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_CB(s, i));
+               }
+               if (!--ref)
+                  return ref;
+            }
+         }
+      }
+
+      for (s = 0; s < 6; ++s) {
+         for (i = 0; i < NVC0_MAX_BUFFERS; ++i) {
+            if (nvc0->buffers[s][i].buffer == res) {
+               nvc0->buffers_dirty[s] |= 1 << i;
+               if (unlikely(s == 5)) {
+                  nvc0->dirty_cp |= NVC0_NEW_CP_BUFFERS;
+                  nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_BUF);
+               } else {
+                  nvc0->dirty_3d |= NVC0_NEW_3D_BUFFERS;
+                  nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_BUF);
+               }
+               if (!--ref)
+                  return ref;
+            }
+         }
+      }
+
+      for (s = 0; s < 6; ++s) {
+         for (i = 0; i < NVC0_MAX_IMAGES; ++i) {
+            if (nvc0->images[s][i].resource == res) {
+               nvc0->images_dirty[s] |= 1 << i;
+               if (unlikely(s == 5)) {
+                  nvc0->dirty_cp |= NVC0_NEW_CP_SURFACES;
+                  nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_SUF);
+               } else {
+                  nvc0->dirty_3d |= NVC0_NEW_3D_SURFACES;
+                  nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_SUF);
+               }
             }
             if (!--ref)
                return ref;
          }
-      }
-      }
-
-      for (s = 0; s < 6; ++s) {
-      for (i = 0; i < NVC0_MAX_BUFFERS; ++i) {
-         if (nvc0->buffers[s][i].buffer == res) {
-            nvc0->buffers_dirty[s] |= 1 << i;
-            if (unlikely(s == 5)) {
-               nvc0->dirty_cp |= NVC0_NEW_CP_BUFFERS;
-               nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_BUF);
-            } else {
-               nvc0->dirty_3d |= NVC0_NEW_3D_BUFFERS;
-               nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_BUF);
-            }
-            if (!--ref)
-               return ref;
-         }
-      }
-      }
-
-      for (s = 0; s < 6; ++s) {
-      for (i = 0; i < NVC0_MAX_IMAGES; ++i) {
-         if (nvc0->images[s][i].resource == res) {
-            nvc0->images_dirty[s] |= 1 << i;
-            if (unlikely(s == 5)) {
-               nvc0->dirty_cp |= NVC0_NEW_CP_SURFACES;
-               nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_SUF);
-            } else {
-               nvc0->dirty_3d |= NVC0_NEW_3D_SURFACES;
-               nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_SUF);
-            }
-         }
-         if (!--ref)
-            return ref;
-      }
       }
    }
 
@@ -422,14 +439,13 @@ nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
 
    flags = NV_VRAM_DOMAIN(&screen->base) | NOUVEAU_BO_RD;
 
-   BCTX_REFN_bo(nvc0->bufctx_3d, 3D_SCREEN, flags, screen->text);
+   BCTX_REFN_bo(nvc0->bufctx_3d, 3D_TEXT, flags, screen->text);
    BCTX_REFN_bo(nvc0->bufctx_3d, 3D_SCREEN, flags, screen->uniform_bo);
    BCTX_REFN_bo(nvc0->bufctx_3d, 3D_SCREEN, flags, screen->txc);
    if (screen->compute) {
-      BCTX_REFN_bo(nvc0->bufctx_cp, CP_SCREEN, flags, screen->text);
+      BCTX_REFN_bo(nvc0->bufctx_cp, CP_TEXT, flags, screen->text);
       BCTX_REFN_bo(nvc0->bufctx_cp, CP_SCREEN, flags, screen->uniform_bo);
       BCTX_REFN_bo(nvc0->bufctx_cp, CP_SCREEN, flags, screen->txc);
-      BCTX_REFN_bo(nvc0->bufctx_cp, CP_SCREEN, flags, screen->parm);
    }
 
    flags = NV_VRAM_DOMAIN(&screen->base) | NOUVEAU_BO_RDWR;
@@ -486,10 +502,8 @@ nvc0_bufctx_fence(struct nvc0_context *nvc0, struct nouveau_bufctx *bufctx,
    NOUVEAU_DRV_STAT(&nvc0->screen->base, resource_validate_count, count);
 }
 
-static void
-nvc0_context_get_sample_position(struct pipe_context *pipe,
-                                 unsigned sample_count, unsigned sample_index,
-                                 float *xy)
+const void *
+nvc0_get_sample_locations(unsigned sample_count)
 {
    static const uint8_t ms1[1][2] = { { 0x8, 0x8 } };
    static const uint8_t ms2[2][2] = {
@@ -521,8 +535,22 @@ nvc0_context_get_sample_position(struct pipe_context *pipe,
    case 8: ptr = ms8; break;
    default:
       assert(0);
-      return; /* bad sample count -> undefined locations */
+      return NULL; /* bad sample count -> undefined locations */
    }
+   return ptr;
+}
+
+static void
+nvc0_context_get_sample_position(struct pipe_context *pipe,
+                                 unsigned sample_count, unsigned sample_index,
+                                 float *xy)
+{
+   const uint8_t (*ptr)[2];
+
+   ptr = nvc0_get_sample_locations(sample_count);
+   if (!ptr)
+      return;
+
    xy[0] = ptr[sample_index][0] * 0.0625f;
    xy[1] = ptr[sample_index][1] * 0.0625f;
 }

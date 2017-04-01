@@ -45,7 +45,7 @@ boolean
 util_format_is_float(enum pipe_format format)
 {
    const struct util_format_description *desc = util_format_description(format);
-   unsigned i;
+   int i;
 
    assert(desc);
    if (!desc) {
@@ -53,7 +53,7 @@ util_format_is_float(enum pipe_format format)
    }
 
    i = util_format_get_first_non_void_channel(format);
-   if (i == -1) {
+   if (i < 0) {
       return FALSE;
    }
 
@@ -457,6 +457,30 @@ util_format_write_4i(enum pipe_format format,
    format_desc->pack_rgba_sint(dst_row, dst_stride, src_row, src_stride, w, h);
 }
 
+/**
+ * Check if we can safely memcopy from the source format to the dest format.
+ * This basically covers the cases of a "used" channel copied to a typeless
+ * channel, plus some 1-channel cases.
+ * Examples of compatible copy formats include:
+ *    b8g8r8a8_unorm -> b8g8r8x8_unorm
+ *    a8r8g8b8_unorm -> x8r8g8b8_unorm
+ *    b5g5r5a1_unorm -> b5g5r5x1_unorm
+ *    b4g4r4a4_unorm -> b4g4r4x4_unorm
+ *    l8_unorm -> r8_unorm
+ *    i8_unorm -> l8_unorm
+ *    i8_unorm -> a8_unorm
+ *    i8_unorm -> r8_unorm
+ *    l16_unorm -> r16_unorm
+ *    z24_unorm_s8_uint -> z24x8_unorm
+ *    s8_uint_z24_unorm -> x8z24_unorm
+ *    r8g8b8a8_unorm -> r8g8b8x8_unorm
+ *    a8b8g8r8_srgb -> x8b8g8r8_srgb
+ *    b8g8r8a8_srgb -> b8g8r8x8_srgb
+ *    a8r8g8b8_srgb -> x8r8g8b8_srgb
+ *    a8b8g8r8_unorm -> x8b8g8r8_unorm
+ *    r10g10b10a2_uscaled -> r10g10b10x2_uscaled
+ *    r10sg10sb10sa2u_norm -> r10g10b10x2_snorm
+ */
 boolean
 util_is_format_compatible(const struct util_format_description *src_desc,
                           const struct util_format_description *dst_desc)
@@ -735,6 +759,40 @@ util_format_translate(enum pipe_format dst_format,
       }
 
       FREE(tmp_row);
+   }
+   return TRUE;
+}
+
+boolean
+util_format_translate_3d(enum pipe_format dst_format,
+                         void *dst, unsigned dst_stride,
+                         unsigned dst_slice_stride,
+                         unsigned dst_x, unsigned dst_y,
+                         unsigned dst_z,
+                         enum pipe_format src_format,
+                         const void *src, unsigned src_stride,
+                         unsigned src_slice_stride,
+                         unsigned src_x, unsigned src_y,
+                         unsigned src_z, unsigned width,
+                         unsigned height, unsigned depth)
+{
+   uint8_t *dst_layer;
+   const uint8_t *src_layer;
+   unsigned z;
+   dst_layer = dst;
+   src_layer = src;
+   dst_layer += dst_z * dst_slice_stride;
+   src_layer += src_z * src_slice_stride;
+   for (z = 0; z < depth; ++z) {
+      if (!util_format_translate(dst_format, dst_layer, dst_stride,
+                                 dst_x, dst_y,
+                                 src_format, src_layer, src_stride,
+                                 src_x, src_y,
+                                 width, height))
+          return FALSE;
+
+      dst_layer += dst_slice_stride;
+      src_layer += src_slice_stride;
    }
    return TRUE;
 }

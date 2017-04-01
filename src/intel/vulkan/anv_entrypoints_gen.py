@@ -51,6 +51,32 @@ def hash(name):
 
     return h
 
+def get_platform_guard_macro(name):
+    if "Xlib" in name:
+        return "VK_USE_PLATFORM_XLIB_KHR"
+    elif "Xcb" in name:
+        return "VK_USE_PLATFORM_XCB_KHR"
+    elif "Wayland" in name:
+        return "VK_USE_PLATFORM_WAYLAND_KHR"
+    elif "Mir" in name:
+        return "VK_USE_PLATFORM_MIR_KHR"
+    elif "Android" in name:
+        return "VK_USE_PLATFORM_ANDROID_KHR"
+    elif "Win32" in name:
+        return "VK_USE_PLATFORM_WIN32_KHR"
+    else:
+        return None
+
+def print_guard_start(name):
+    guard = get_platform_guard_macro(name)
+    if guard is not None:
+        print "#ifdef {0}".format(guard)
+
+def print_guard_end(name):
+    guard = get_platform_guard_macro(name)
+    if guard is not None:
+        print "#endif // {0}".format(guard)
+
 opt_header = False
 opt_code = False
 
@@ -86,20 +112,29 @@ if opt_header:
     print "      struct {"
 
     for type, name, args, num, h in entrypoints:
-        print "         %s (*%s)%s;" % (type, name, args)
+        guard = get_platform_guard_macro(name)
+        if guard is not None:
+            print "#ifdef {0}".format(guard)
+            print "         PFN_vk{0} {0};".format(name)
+            print "#else"
+            print "         void *{0};".format(name)
+            print "#endif"
+        else:
+            print "         PFN_vk{0} {0};".format(name)
     print "      };\n"
     print "   };\n"
     print "};\n"
 
-    print "void anv_set_dispatch_devinfo(const struct brw_device_info *info);\n"
+    print "void anv_set_dispatch_devinfo(const struct gen_device_info *info);\n"
 
     for type, name, args, num, h in entrypoints:
+        print_guard_start(name)
         print "%s anv_%s%s;" % (type, name, args)
         print "%s gen7_%s%s;" % (type, name, args)
         print "%s gen75_%s%s;" % (type, name, args)
         print "%s gen8_%s%s;" % (type, name, args)
         print "%s gen9_%s%s;" % (type, name, args)
-        print "%s anv_validate_%s%s;" % (type, name, args)
+        print_guard_end(name)
     exit()
 
 
@@ -149,71 +184,44 @@ for type, name, args, num, h in entrypoints:
     print "   \"vk%s\\0\"" % name
     offsets.append(i)
     i += 2 + len(name) + 1
-print """   ;
+print "   ;"
 
-/* Weak aliases for all potential validate functions. These will resolve to
- * NULL if they're not defined, which lets the resolve_entrypoint() function
- * either pick a validate wrapper if available or just plug in the actual
- * entry point.
- */
-"""
-
-# Now generate the table of all entry points and their validation functions
+# Now generate the table of all entry points
 
 print "\nstatic const struct anv_entrypoint entrypoints[] = {"
 for type, name, args, num, h in entrypoints:
     print "   { %5d, 0x%08x }," % (offsets[num], h)
 print "};\n"
 
-for layer in [ "anv", "validate", "gen7", "gen75", "gen8", "gen9" ]:
+print """
+
+/* Weak aliases for all potential implementations. These will resolve to
+ * NULL if they're not defined, which lets the resolve_entrypoint() function
+ * either pick the correct entry point.
+ */
+"""
+
+for layer in [ "anv", "gen7", "gen75", "gen8", "gen9" ]:
     for type, name, args, num, h in entrypoints:
+        print_guard_start(name)
         print "%s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
+        print_guard_end(name)
     print "\nconst struct anv_dispatch_table %s_layer = {" % layer
     for type, name, args, num, h in entrypoints:
+        print_guard_start(name)
         print "   .%s = %s_%s," % (name, layer, name)
+        print_guard_end(name)
     print "};\n"
 
 print """
-#ifdef DEBUG
-static bool enable_validate = true;
-#else
-static bool enable_validate = false;
-#endif
-
-/* We can't use symbols that need resolving (like, oh, getenv) in the resolve
- * function. This means that we have to determine whether or not to use the
- * validation layer sometime before that. The constructor function attribute asks
- * the dynamic linker to invoke determine_validate() at dlopen() time which
- * works.
- */
-static void __attribute__ ((constructor))
-determine_validate(void)
+static void * __attribute__ ((noinline))
+anv_resolve_entrypoint(const struct gen_device_info *devinfo, uint32_t index)
 {
-   const char *s = getenv("ANV_VALIDATE");
-
-   if (s)
-      enable_validate = atoi(s);
-}
-
-static const struct brw_device_info *dispatch_devinfo;
-
-void
-anv_set_dispatch_devinfo(const struct brw_device_info *devinfo)
-{
-   dispatch_devinfo = devinfo;
-}
-
-void * __attribute__ ((noinline))
-anv_resolve_entrypoint(uint32_t index)
-{
-   if (enable_validate && validate_layer.entrypoints[index])
-      return validate_layer.entrypoints[index];
-
-   if (dispatch_devinfo == NULL) {
+   if (devinfo == NULL) {
       return anv_layer.entrypoints[index];
    }
 
-   switch (dispatch_devinfo->gen) {
+   switch (devinfo->gen) {
    case 9:
       if (gen9_layer.entrypoints[index])
          return gen9_layer.entrypoints[index];
@@ -223,7 +231,7 @@ anv_resolve_entrypoint(uint32_t index)
          return gen8_layer.entrypoints[index];
       /* fall through */
    case 7:
-      if (dispatch_devinfo->is_haswell && gen75_layer.entrypoints[index])
+      if (devinfo->is_haswell && gen75_layer.entrypoints[index])
          return gen75_layer.entrypoints[index];
 
       if (gen7_layer.entrypoints[index])
@@ -236,15 +244,6 @@ anv_resolve_entrypoint(uint32_t index)
    }
 }
 """
-
-# Now output ifuncs and their resolve helpers for all entry points. The
-# resolve helper calls resolve_entrypoint() with the entry point index, which
-# lets the resolver look it up in the table.
-
-for type, name, args, num, h in entrypoints:
-    print "static void *resolve_%s(void) { return anv_resolve_entrypoint(%d); }" % (name, num)
-    print "%s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));\n" % (type, name, args, name)
-
 
 # Now generate the hash table used for entry point look up.  This is a
 # uint16_t table of entry point indices. We use 0xffff to indicate an entry
@@ -294,7 +293,7 @@ print "};"
 
 print """
 void *
-anv_lookup_entrypoint(const char *name)
+anv_lookup_entrypoint(const struct gen_device_info *devinfo, const char *name)
 {
    static const uint32_t prime_factor = %d;
    static const uint32_t prime_step = %d;
@@ -318,6 +317,6 @@ anv_lookup_entrypoint(const char *name)
    if (strcmp(name, strings + e->name) != 0)
       return NULL;
 
-   return anv_resolve_entrypoint(i);
+   return anv_resolve_entrypoint(devinfo, i);
 }
 """ % (prime_factor, prime_step, hash_mask)

@@ -119,6 +119,42 @@ static boolean str_match_nocase_whole( const char **pcur, const char *str )
    return FALSE;
 }
 
+/* Return the array index that matches starting at *pcur, where the string at
+ * *pcur is terminated by a non-digit non-letter non-underscore.
+ * Returns -1 if no match is found.
+ *
+ * On success, the pointer to the first string is moved to the end of the read
+ * word.
+ */
+static int str_match_name_from_array(const char **pcur,
+                                     const char * const *array,
+                                     unsigned array_size)
+{
+   for (unsigned j = 0; j < array_size; ++j) {
+      if (str_match_nocase_whole(pcur, array[j]))
+         return j;
+   }
+   return -1;
+}
+
+/* Return the format corresponding to the name at *pcur.
+ * Returns -1 if there is no format name.
+ *
+ * On success, the pointer to the string is moved to the end of the read format
+ * name.
+ */
+static int str_match_format(const char **pcur)
+{
+   for (unsigned i = 0; i < PIPE_FORMAT_COUNT; i++) {
+      const struct util_format_description *desc =
+         util_format_description(i);
+      if (desc && str_match_nocase_whole(pcur, desc->name)) {
+         return i;
+      }
+   }
+   return -1;
+}
+
 /* Eat zero or more whitespaces.
  */
 static void eat_opt_white( const char **pcur )
@@ -250,6 +286,42 @@ static boolean parse_double( const char **pcur, uint32_t *val0, uint32_t *val1)
    } v;
 
    v.dval = strtod(cur, (char**)pcur);
+   if (*pcur == cur)
+      return FALSE;
+
+   *val0 = v.uval[0];
+   *val1 = v.uval[1];
+
+   return TRUE;
+}
+
+static boolean parse_int64( const char **pcur, uint32_t *val0, uint32_t *val1)
+{
+   const char *cur = *pcur;
+   union {
+      int64_t i64val;
+      uint32_t uval[2];
+   } v;
+
+   v.i64val = strtoll(cur, (char**)pcur, 0);
+   if (*pcur == cur)
+      return FALSE;
+
+   *val0 = v.uval[0];
+   *val1 = v.uval[1];
+
+   return TRUE;
+}
+
+static boolean parse_uint64( const char **pcur, uint32_t *val0, uint32_t *val1)
+{
+   const char *cur = *pcur;
+   union {
+      uint64_t u64val;
+      uint32_t uval[2];
+   } v;
+
+   v.u64val = strtoull(cur, (char**)pcur, 0);
    if (*pcur == cur)
       return FALSE;
 
@@ -1045,6 +1117,9 @@ parse_instruction(
       inst.Memory.Qualifier = 0;
    }
 
+   assume(info->num_dst <= TGSI_FULL_MAX_DST_REGISTERS);
+   assume(info->num_src <= TGSI_FULL_MAX_SRC_REGISTERS);
+
    /* Parse instruction operands.
     */
    for (i = 0; i < info->num_dst + info->num_src + info->is_tex; i++) {
@@ -1098,23 +1173,37 @@ parse_instruction(
 
    cur = ctx->cur;
    eat_opt_white(&cur);
-   for (i = 0; inst.Instruction.Memory && *cur == ','; i++) {
-      uint j;
+
+   for (; inst.Instruction.Memory && *cur == ',';
+        ctx->cur = cur, eat_opt_white(&cur)) {
+      int j;
+
       cur++;
       eat_opt_white(&cur);
+
+      j = str_match_name_from_array(&cur, tgsi_memory_names,
+                                    ARRAY_SIZE(tgsi_memory_names));
+      if (j >= 0) {
+         inst.Memory.Qualifier |= 1U << j;
+         continue;
+      }
+
+      j = str_match_name_from_array(&cur, tgsi_texture_names,
+                                    ARRAY_SIZE(tgsi_texture_names));
+      if (j >= 0) {
+         inst.Memory.Texture = j;
+         continue;
+      }
+
+      j = str_match_format(&cur);
+      if (j >= 0) {
+         inst.Memory.Format = j;
+         continue;
+      }
+
       ctx->cur = cur;
-      for (j = 0; j < 3; j++) {
-         if (str_match_nocase_whole(&ctx->cur, tgsi_memory_names[j])) {
-            inst.Memory.Qualifier |= 1U << j;
-            break;
-         }
-      }
-      if (j == 3) {
-         report_error(ctx, "Expected memory qualifier");
-         return FALSE;
-      }
-      cur = ctx->cur;
-      eat_opt_white(&cur);
+      report_error(ctx, "Expected memory qualifier, texture target, or format\n");
+      return FALSE;
    }
 
    cur = ctx->cur;
@@ -1173,6 +1262,14 @@ static boolean parse_immediate_data(struct translate_ctx *ctx, unsigned type,
       switch (type) {
       case TGSI_IMM_FLOAT64:
          ret = parse_double(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
+         i++;
+         break;
+      case TGSI_IMM_INT64:
+         ret = parse_int64(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
+         i++;
+         break;
+      case TGSI_IMM_UINT64:
+         ret = parse_uint64(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
          i++;
          break;
       case TGSI_IMM_FLOAT32:
@@ -1302,16 +1399,11 @@ static boolean parse_declaration( struct translate_ctx *ctx )
                decl.Image.Writable = 1;
 
             } else {
-               for (i = 0; i < PIPE_FORMAT_COUNT; i++) {
-                  const struct util_format_description *desc =
-                     util_format_description(i);
-                  if (desc && str_match_nocase_whole(&cur2, desc->name)) {
-                     decl.Image.Format = i;
-                     break;
-                  }
-               }
-               if (i == PIPE_FORMAT_COUNT)
+               int format = str_match_format(&cur2);
+               if (format < 0)
                   break;
+
+               decl.Image.Format = format;
             }
             cur = cur2;
             eat_opt_white(&cur2);
@@ -1539,11 +1631,11 @@ static boolean parse_immediate( struct translate_ctx *ctx )
       report_error( ctx, "Syntax error" );
       return FALSE;
    }
-   for (type = 0; type < Elements(tgsi_immediate_type_names); ++type) {
+   for (type = 0; type < ARRAY_SIZE(tgsi_immediate_type_names); ++type) {
       if (str_match_nocase_whole(&ctx->cur, tgsi_immediate_type_names[type]))
          break;
    }
-   if (type == Elements(tgsi_immediate_type_names)) {
+   if (type == ARRAY_SIZE(tgsi_immediate_type_names)) {
       report_error( ctx, "Expected immediate type" );
       return FALSE;
    }
@@ -1589,7 +1681,7 @@ parse_fs_coord_origin( const char **pcur, uint *fs_coord_origin )
 {
    uint i;
 
-   for (i = 0; i < Elements(tgsi_fs_coord_origin_names); i++) {
+   for (i = 0; i < ARRAY_SIZE(tgsi_fs_coord_origin_names); i++) {
       const char *cur = *pcur;
 
       if (str_match_nocase_whole( &cur, tgsi_fs_coord_origin_names[i])) {
@@ -1606,7 +1698,7 @@ parse_fs_coord_pixel_center( const char **pcur, uint *fs_coord_pixel_center )
 {
    uint i;
 
-   for (i = 0; i < Elements(tgsi_fs_coord_pixel_center_names); i++) {
+   for (i = 0; i < ARRAY_SIZE(tgsi_fs_coord_pixel_center_names); i++) {
       const char *cur = *pcur;
 
       if (str_match_nocase_whole( &cur, tgsi_fs_coord_pixel_center_names[i])) {
@@ -1618,6 +1710,22 @@ parse_fs_coord_pixel_center( const char **pcur, uint *fs_coord_pixel_center )
    return FALSE;
 }
 
+static boolean
+parse_property_next_shader( const char **pcur, uint *next_shader )
+{
+   uint i;
+
+   for (i = 0; i < ARRAY_SIZE(tgsi_processor_type_names); i++) {
+      const char *cur = *pcur;
+
+      if (str_match_nocase_whole( &cur, tgsi_processor_type_names[i])) {
+         *next_shader = i;
+         *pcur = cur;
+         return TRUE;
+      }
+   }
+   return FALSE;
+}
 
 static boolean parse_property( struct translate_ctx *ctx )
 {
@@ -1668,6 +1776,12 @@ static boolean parse_property( struct translate_ctx *ctx )
    case TGSI_PROPERTY_FS_COORD_PIXEL_CENTER:
       if (!parse_fs_coord_pixel_center(&ctx->cur, &values[0] )) {
          report_error( ctx, "Unknown coord pixel center as property: must be HALF_INTEGER or INTEGER!" );
+         return FALSE;
+      }
+      break;
+   case TGSI_PROPERTY_NEXT_SHADER:
+      if (!parse_property_next_shader(&ctx->cur, &values[0] )) {
+         report_error( ctx, "Unknown next shader property value." );
          return FALSE;
       }
       break;

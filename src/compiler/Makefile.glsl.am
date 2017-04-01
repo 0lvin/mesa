@@ -25,6 +25,7 @@ EXTRA_DIST += glsl/tests glsl/glcpp/tests glsl/README	\
 	glsl/TODO glsl/glcpp/README			\
 	glsl/glsl_lexer.ll				\
 	glsl/glsl_parser.yy				\
+	glsl/ir_expression_operation.py			\
 	glsl/glcpp/glcpp-lex.l				\
 	glsl/glcpp/glcpp-parse.y			\
 	SConscript.glsl
@@ -32,10 +33,12 @@ EXTRA_DIST += glsl/tests glsl/glcpp/tests glsl/README	\
 TESTS += glsl/glcpp/tests/glcpp-test			\
 	glsl/glcpp/tests/glcpp-test-cr-lf		\
 	glsl/tests/blob-test				\
+	glsl/tests/cache-test				\
 	glsl/tests/general-ir-test			\
 	glsl/tests/optimization-test			\
 	glsl/tests/sampler-types-test			\
-	glsl/tests/uniform-initializer-test
+	glsl/tests/uniform-initializer-test             \
+	glsl/tests/warnings-test
 
 TESTS_ENVIRONMENT= \
 	export PYTHON2=$(PYTHON2); \
@@ -45,6 +48,7 @@ check_PROGRAMS +=					\
 	glsl/glcpp/glcpp				\
 	glsl/glsl_test					\
 	glsl/tests/blob-test				\
+	glsl/tests/cache-test				\
 	glsl/tests/general-ir-test			\
 	glsl/tests/sampler-types-test			\
 	glsl/tests/uniform-initializer-test
@@ -56,8 +60,12 @@ glsl_tests_blob_test_SOURCES =				\
 glsl_tests_blob_test_LDADD =				\
 	glsl/libglsl.la
 
+glsl_tests_cache_test_SOURCES =				\
+	glsl/tests/cache_test.c
+glsl_tests_cache_test_LDADD =				\
+	glsl/libglsl.la
+
 glsl_tests_general_ir_test_SOURCES =			\
-	glsl/standalone_scaffolding.cpp			\
 	glsl/tests/builtin_variable_test.cpp		\
 	glsl/tests/invalidate_locations_test.cpp	\
 	glsl/tests/general_ir_test.cpp			\
@@ -67,6 +75,7 @@ glsl_tests_general_ir_test_CFLAGS =			\
 glsl_tests_general_ir_test_LDADD =			\
 	$(top_builddir)/src/gtest/libgtest.la		\
 	glsl/libglsl.la		\
+	glsl/libstandalone.la				\
 	$(top_builddir)/src/libglsl_util.la		\
 	$(PTHREAD_LIBS)
 
@@ -93,7 +102,7 @@ glsl_tests_sampler_types_test_LDADD =			\
 	$(top_builddir)/src/libglsl_util.la		\
 	$(PTHREAD_LIBS)
 
-noinst_LTLIBRARIES += glsl/libglsl.la glsl/libglcpp.la
+noinst_LTLIBRARIES += glsl/libglsl.la glsl/libglcpp.la glsl/libstandalone.la
 
 glsl_libglcpp_la_LIBADD =				\
 	$(top_builddir)/src/util/libmesautil.la
@@ -115,29 +124,36 @@ glsl_libglsl_la_LIBADD = \
 	glsl/libglcpp.la
 
 glsl_libglsl_la_SOURCES =				\
-	glsl/glsl_lexer.cpp				\
-	glsl/glsl_parser.cpp				\
-	glsl/glsl_parser.h				\
+	$(LIBGLSL_GENERATED_FILES)			\
 	$(LIBGLSL_FILES)
 
+if ENABLE_SHADER_CACHE
+glsl_libglsl_la_SOURCES += $(LIBGLSL_SHADER_CACHE_FILES)
+endif
 
-glsl_compiler_SOURCES = \
+glsl_libstandalone_la_SOURCES = \
 	$(GLSL_COMPILER_CXX_FILES)
 
-glsl_compiler_LDADD =					\
+glsl_libstandalone_la_LIBADD =				\
 	glsl/libglsl.la					\
 	$(top_builddir)/src/libglsl_util.la		\
 	$(top_builddir)/src/util/libmesautil.la		\
 	$(PTHREAD_LIBS)
 
+glsl_compiler_SOURCES = \
+	glsl/main.cpp
+
+glsl_compiler_LDADD = \
+	glsl/libstandalone.la
+
 glsl_glsl_test_SOURCES = \
-	glsl/standalone_scaffolding.cpp \
 	glsl/test.cpp \
 	glsl/test_optpass.cpp \
 	glsl/test_optpass.h
 
 glsl_glsl_test_LDADD =					\
 	glsl/libglsl.la					\
+	glsl/libstandalone.la				\
 	$(top_builddir)/src/libglsl_util.la		\
 	$(PTHREAD_LIBS)
 
@@ -173,6 +189,7 @@ am__v_YACC_1 =
 
 YACC_GEN = $(AM_V_YACC)$(YACC) $(YFLAGS)
 LEX_GEN = $(AM_V_LEX)$(LEX) $(LFLAGS)
+PYTHON_GEN = $(AM_V_GEN)$(PYTHON2) $(PYTHON_FLAGS)
 
 glsl/glsl_parser.cpp glsl/glsl_parser.h: glsl/glsl_parser.yy
 	$(MKDIR_GEN)
@@ -190,6 +207,18 @@ glsl/glcpp/glcpp-lex.c: glsl/glcpp/glcpp-lex.l
 	$(MKDIR_GEN)
 	$(LEX_GEN) -o $@ $(srcdir)/glsl/glcpp/glcpp-lex.l
 
+glsl/ir_expression_operation.h: glsl/ir_expression_operation.py
+	$(MKDIR_GEN)
+	$(PYTHON_GEN) $(srcdir)/glsl/ir_expression_operation.py enum > $@ || ($(RM) $@; false)
+
+glsl/ir_expression_operation_constant.h: glsl/ir_expression_operation.py
+	$(MKDIR_GEN)
+	$(PYTHON_GEN) $(srcdir)/glsl/ir_expression_operation.py constant > $@ || ($(RM) $@; false)
+
+glsl/ir_expression_operation_strings.h: glsl/ir_expression_operation.py
+	$(MKDIR_GEN)
+	$(PYTHON_GEN) $(srcdir)/glsl/ir_expression_operation.py strings > $@ || ($(RM) $@; false)
+
 # Only the parsers (specifically the header files generated at the same time)
 # need to be in BUILT_SOURCES. Though if we list the parser headers YACC is
 # called for the .c/.cpp file and the .h files. By listing the .c/.cpp files
@@ -199,6 +228,9 @@ glsl/glcpp/glcpp-lex.c: glsl/glcpp/glcpp-lex.l
 BUILT_SOURCES +=					\
 	glsl/glsl_parser.cpp				\
 	glsl/glsl_lexer.cpp				\
+	glsl/ir_expression_operation.h			\
+	glsl/ir_expression_operation_constant.h		\
+	glsl/ir_expression_operation_strings.h		\
 	glsl/glcpp/glcpp-parse.c			\
 	glsl/glcpp/glcpp-lex.c
 CLEANFILES +=						\
@@ -206,6 +238,9 @@ CLEANFILES +=						\
 	glsl/glsl_parser.h				\
 	glsl/glsl_parser.cpp				\
 	glsl/glsl_lexer.cpp				\
+	glsl/ir_expression_operation.h			\
+	glsl/ir_expression_operation_constant.h		\
+	glsl/ir_expression_operation_strings.h		\
 	glsl/glcpp/glcpp-parse.c			\
 	glsl/glcpp/glcpp-lex.c
 

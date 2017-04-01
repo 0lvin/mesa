@@ -112,10 +112,11 @@ struct GlobalKnobs
 };
 extern GlobalKnobs g_GlobalKnobs;
 
+#undef DEFINE_KNOB
+
 % for knob in knobs:
 #define KNOB_${knob[0]}${space_knob(knob[0])} GET_KNOB(${knob[0]})
 % endfor
-
 
 % else:
 % for inc in includes:
@@ -135,7 +136,6 @@ GlobalKnobs::GlobalKnobs()
     % for knob in knobs:
     InitKnob(${knob[0]});
     % endfor
-
 }
 
 //========================================================
@@ -163,6 +163,5 @@ std::string GlobalKnobs::ToString(const char* optPerLinePrefix)
 
     return str.str();
 }
-
 
 % endif

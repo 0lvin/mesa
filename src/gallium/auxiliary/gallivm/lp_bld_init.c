@@ -66,6 +66,7 @@ static const struct debug_named_value lp_bld_debug_flags[] = {
    { "no_rho_approx", GALLIVM_DEBUG_NO_RHO_APPROX, NULL },
    { "no_quad_lod", GALLIVM_DEBUG_NO_QUAD_LOD, NULL },
    { "gc",     GALLIVM_DEBUG_GC, NULL },
+   { "dumpbc", GALLIVM_DEBUG_DUMP_BC, NULL },
    DEBUG_NAMED_VALUE_END
 };
 
@@ -419,6 +420,7 @@ lp_build_init(void)
       util_cpu_caps.has_avx = 0;
       util_cpu_caps.has_avx2 = 0;
       util_cpu_caps.has_f16c = 0;
+      util_cpu_caps.has_fma = 0;
    }
 #endif
 
@@ -453,6 +455,12 @@ lp_build_init(void)
       util_cpu_caps.has_avx = 0;
       util_cpu_caps.has_avx2 = 0;
       util_cpu_caps.has_f16c = 0;
+      util_cpu_caps.has_fma = 0;
+   }
+   if (HAVE_LLVM < 0x0304 || !USE_MCJIT) {
+      /* AVX2 support has only been tested with LLVM 3.4, and it requires
+       * MCJIT. */
+      util_cpu_caps.has_avx2 = 0;
    }
 
 #ifdef PIPE_ARCH_PPC_64
@@ -592,10 +600,13 @@ gallivm_compile_module(struct gallivm_state *gallivm)
    }
 
    /* Dump byte code to a file */
-   if (0) {
-      LLVMWriteBitcodeToFile(gallivm->module, "llvmpipe.bc");
-      debug_printf("llvmpipe.bc written\n");
-      debug_printf("Invoke as \"llc -o - llvmpipe.bc\"\n");
+   if (gallivm_debug & GALLIVM_DEBUG_DUMP_BC) {
+      char filename[256];
+      assert(gallivm->module_name);
+      util_snprintf(filename, sizeof(filename), "ir_%s.bc", gallivm->module_name);
+      LLVMWriteBitcodeToFile(gallivm->module, filename);
+      debug_printf("%s written\n", filename);
+      debug_printf("Invoke as \"llc -o - %s\"\n", filename);
    }
 
    if (USE_MCJIT) {
@@ -648,13 +659,24 @@ gallivm_jit_function(struct gallivm_state *gallivm,
 {
    void *code;
    func_pointer jit_func;
+   int64_t time_begin = 0;
 
    assert(gallivm->compiled);
    assert(gallivm->engine);
 
+   if (gallivm_debug & GALLIVM_DEBUG_PERF)
+      time_begin = os_time_get();
+
    code = LLVMGetPointerToGlobal(gallivm->engine, func);
    assert(code);
    jit_func = pointer_to_func(code);
+
+   if (gallivm_debug & GALLIVM_DEBUG_PERF) {
+      int64_t time_end = os_time_get();
+      int time_msec = (int)(time_end - time_begin) / 1000;
+      debug_printf("   jitting func %s took %d msec\n",
+                   LLVMGetValueName(func), time_msec);
+   }
 
    return jit_func;
 }

@@ -50,9 +50,10 @@ static struct fd4_shader_stateobj *
 create_shader_stateobj(struct pipe_context *pctx, const struct pipe_shader_state *cso,
 		enum shader_t type)
 {
+	struct fd_context *ctx = fd_context(pctx);
+	struct ir3_compiler *compiler = ctx->screen->compiler;
 	struct fd4_shader_stateobj *so = CALLOC_STRUCT(fd4_shader_stateobj);
-	struct ir3_compiler *compiler = fd_context(pctx)->screen->compiler;
-	so->shader = ir3_shader_create(compiler, cso, type);
+	so->shader = ir3_shader_create(compiler, cso, type, &ctx->debug);
 	return so;
 }
 
@@ -120,6 +121,12 @@ emit_shader(struct fd_ringbuffer *ring, const struct ir3_shader_variant *so)
 		OUT_RELOC(ring, so->bo, 0,
 				CP_LOAD_STATE_1_STATE_TYPE(ST_SHADER), 0);
 	}
+
+	/* for how clever coverity is, it is sometimes rather dull, and
+	 * doesn't realize that the only case where bin==NULL, sz==0:
+	 */
+	assume(bin || (sz == 0));
+
 	for (i = 0; i < sz; i++) {
 		OUT_RING(ring, bin[i]);
 	}
@@ -228,6 +235,13 @@ fd4_program_emit(struct fd_ringbuffer *ring, struct fd4_emit *emit,
 	constmode = 1;
 
 	pos_regid = ir3_find_output_regid(s[VS].v, VARYING_SLOT_POS);
+	if (pos_regid == regid(63, 0)) {
+		/* hw dislikes when there is no position output, which can
+		 * happen for transform-feedback vertex shaders.  Just tell
+		 * the hw to use r0.x, with whatever random value is there:
+		 */
+		pos_regid = regid(0, 0);
+	}
 	posz_regid = ir3_find_output_regid(s[FS].v, FRAG_RESULT_DEPTH);
 	psize_regid = ir3_find_output_regid(s[VS].v, VARYING_SLOT_PSIZ);
 	if (s[FS].v->color0_mrt) {
@@ -506,7 +520,7 @@ fd4_program_emit(struct fd_ringbuffer *ring, struct fd4_emit *emit,
 			 */
 			uint32_t inloc = s[FS].v->inputs[j].inloc - 8;
 
-			if ((s[FS].v->inputs[j].interpolate == INTERP_QUALIFIER_FLAT) ||
+			if ((s[FS].v->inputs[j].interpolate == INTERP_MODE_FLAT) ||
 					(s[FS].v->inputs[j].rasterflat && emit->rasterflat)) {
 				uint32_t loc = inloc;
 

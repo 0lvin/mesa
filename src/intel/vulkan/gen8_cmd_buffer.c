@@ -40,8 +40,6 @@ gen8_cmd_buffer_emit_viewport(struct anv_cmd_buffer *cmd_buffer)
    const VkViewport *viewports = cmd_buffer->state.dynamic.viewport.viewports;
    struct anv_state sf_clip_state =
       anv_cmd_buffer_alloc_dynamic_state(cmd_buffer, count * 64, 64);
-   struct anv_state cc_state =
-      anv_cmd_buffer_alloc_dynamic_state(cmd_buffer, count * 8, 32);
 
    for (uint32_t i = 0; i < count; i++) {
       const VkViewport *vp = &viewports[i];
@@ -65,102 +63,48 @@ gen8_cmd_buffer_emit_viewport(struct anv_cmd_buffer *cmd_buffer)
          .YMaxViewPort = vp->y + vp->height - 1,
       };
 
-      struct GENX(CC_VIEWPORT) cc_viewport = {
-         .MinimumDepth = vp->minDepth,
-         .MaximumDepth = vp->maxDepth
-      };
-
       GENX(SF_CLIP_VIEWPORT_pack)(NULL, sf_clip_state.map + i * 64,
                                  &sf_clip_viewport);
-      GENX(CC_VIEWPORT_pack)(NULL, cc_state.map + i * 8, &cc_viewport);
    }
 
-   if (!cmd_buffer->device->info.has_llc) {
+   if (!cmd_buffer->device->info.has_llc)
       anv_state_clflush(sf_clip_state);
-      anv_state_clflush(cc_state);
-   }
 
-   anv_batch_emit(&cmd_buffer->batch,
-                  GENX(3DSTATE_VIEWPORT_STATE_POINTERS_CC), cc) {
-      cc.CCViewportPointer = cc_state.offset;
-   }
    anv_batch_emit(&cmd_buffer->batch,
                   GENX(3DSTATE_VIEWPORT_STATE_POINTERS_SF_CLIP), clip) {
       clip.SFClipViewportPointer = sf_clip_state.offset;
    }
 }
-#endif
 
 void
-genX(cmd_buffer_config_l3)(struct anv_cmd_buffer *cmd_buffer, bool enable_slm)
+gen8_cmd_buffer_emit_depth_viewport(struct anv_cmd_buffer *cmd_buffer,
+                                    bool depth_clamp_enable)
 {
-   /* References for GL state:
-    *
-    * - commits e307cfa..228d5a3
-    * - src/mesa/drivers/dri/i965/gen7_l3_state.c
-    */
+   uint32_t count = cmd_buffer->state.dynamic.viewport.count;
+   const VkViewport *viewports = cmd_buffer->state.dynamic.viewport.viewports;
+   struct anv_state cc_state =
+      anv_cmd_buffer_alloc_dynamic_state(cmd_buffer, count * 8, 32);
 
-   uint32_t l3cr_slm, l3cr_noslm;
-   anv_pack_struct(&l3cr_noslm, GENX(L3CNTLREG),
-                   .URBAllocation = 48,
-                   .AllAllocation = 48);
-   anv_pack_struct(&l3cr_slm, GENX(L3CNTLREG),
-                   .SLMEnable = 1,
-                   .URBAllocation = 16,
-                   .AllAllocation = 48);
-   const uint32_t l3cr_val = enable_slm ? l3cr_slm : l3cr_noslm;
-   bool changed = cmd_buffer->state.current_l3_config != l3cr_val;
+   for (uint32_t i = 0; i < count; i++) {
+      const VkViewport *vp = &viewports[i];
 
-   if (changed) {
-      /* According to the hardware docs, the L3 partitioning can only be
-       * changed while the pipeline is completely drained and the caches are
-       * flushed, which involves a first PIPE_CONTROL flush which stalls the
-       * pipeline...
-       */
-      anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
-         pc.DCFlushEnable              = true;
-         pc.PostSyncOperation          = NoWrite;
-         pc.CommandStreamerStallEnable = true;
-      }
+      struct GENX(CC_VIEWPORT) cc_viewport = {
+         .MinimumDepth = depth_clamp_enable ? vp->minDepth : 0.0f,
+         .MaximumDepth = depth_clamp_enable ? vp->maxDepth : 1.0f,
+      };
 
-      /* ...followed by a second pipelined PIPE_CONTROL that initiates
-       * invalidation of the relevant caches. Note that because RO
-       * invalidation happens at the top of the pipeline (i.e. right away as
-       * the PIPE_CONTROL command is processed by the CS) we cannot combine it
-       * with the previous stalling flush as the hardware documentation
-       * suggests, because that would cause the CS to stall on previous
-       * rendering *after* RO invalidation and wouldn't prevent the RO caches
-       * from being polluted by concurrent rendering before the stall
-       * completes. This intentionally doesn't implement the SKL+ hardware
-       * workaround suggesting to enable CS stall on PIPE_CONTROLs with the
-       * texture cache invalidation bit set for GPGPU workloads because the
-       * previous and subsequent PIPE_CONTROLs already guarantee that there is
-       * no concurrent GPGPU kernel execution (see SKL HSD 2132585).
-       */
-      anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
-         pc.TextureCacheInvalidationEnable   = true,
-         pc.ConstantCacheInvalidationEnable  = true,
-         pc.InstructionCacheInvalidateEnable = true,
-         pc.StateCacheInvalidationEnable     = true,
-         pc.PostSyncOperation                = NoWrite;
-      }
+      GENX(CC_VIEWPORT_pack)(NULL, cc_state.map + i * 8, &cc_viewport);
+   }
 
-      /* Now send a third stalling flush to make sure that invalidation is
-       * complete when the L3 configuration registers are modified.
-       */
-      anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
-         pc.DCFlushEnable              = true;
-         pc.PostSyncOperation          = NoWrite;
-         pc.CommandStreamerStallEnable = true;
-      }
+   if (!cmd_buffer->device->info.has_llc)
+      anv_state_clflush(cc_state);
 
-      anv_batch_emit(&cmd_buffer->batch, GENX(MI_LOAD_REGISTER_IMM), lri) {
-         lri.RegisterOffset   = GENX(L3CNTLREG_num);
-         lri.DataDWord        = l3cr_val;
-      }
-      cmd_buffer->state.current_l3_config = l3cr_val;
+   anv_batch_emit(&cmd_buffer->batch,
+                  GENX(3DSTATE_VIEWPORT_STATE_POINTERS_CC), cc) {
+      cc.CCViewportPointer = cc_state.offset;
    }
 }
+#endif
 
 static void
 __emit_genx_sf_state(struct anv_cmd_buffer *cmd_buffer)
@@ -368,102 +312,205 @@ void genX(CmdBindIndexBuffer)(
    cmd_buffer->state.dirty |= ANV_CMD_DIRTY_INDEX_BUFFER;
 }
 
-static VkResult
-flush_compute_descriptor_set(struct anv_cmd_buffer *cmd_buffer)
+
+/**
+ * Emit the HZ_OP packet in the sequence specified by the BDW PRM section
+ * entitled: "Optimized Depth Buffer Clear and/or Stencil Buffer Clear."
+ *
+ * \todo Enable Stencil Buffer-only clears
+ */
+void
+genX(cmd_buffer_emit_hz_op)(struct anv_cmd_buffer *cmd_buffer,
+                          enum blorp_hiz_op op)
 {
-   struct anv_device *device = cmd_buffer->device;
-   struct anv_pipeline *pipeline = cmd_buffer->state.compute_pipeline;
-   struct anv_state surfaces = { 0, }, samplers = { 0, };
-   VkResult result;
+   struct anv_cmd_state *cmd_state = &cmd_buffer->state;
+   const struct anv_image_view *iview =
+      anv_cmd_buffer_get_depth_stencil_view(cmd_buffer);
 
-   result = anv_cmd_buffer_emit_samplers(cmd_buffer,
-                                         MESA_SHADER_COMPUTE, &samplers);
-   if (result != VK_SUCCESS)
-      return result;
-   result = anv_cmd_buffer_emit_binding_table(cmd_buffer,
-                                              MESA_SHADER_COMPUTE, &surfaces);
-   if (result != VK_SUCCESS)
-      return result;
+   if (iview == NULL || !anv_image_has_hiz(iview->image))
+      return;
 
-   struct anv_state push_state = anv_cmd_buffer_cs_push_constants(cmd_buffer);
+   /* FINISHME: Implement multi-subpass HiZ */
+   if (cmd_buffer->state.pass->subpass_count > 1)
+      return;
 
-   const struct brw_cs_prog_data *cs_prog_data = get_cs_prog_data(pipeline);
-   const struct brw_stage_prog_data *prog_data = &cs_prog_data->base;
+   const uint32_t ds = cmd_state->subpass->depth_stencil_attachment;
 
-   unsigned local_id_dwords = cs_prog_data->local_invocation_id_regs * 8;
-   unsigned push_constant_data_size =
-      (prog_data->nr_params + local_id_dwords) * 4;
-   unsigned reg_aligned_constant_size = ALIGN(push_constant_data_size, 32);
-   unsigned push_constant_regs = reg_aligned_constant_size / 32;
+   /* Section 7.4. of the Vulkan 1.0.27 spec states:
+    *
+    *   "The render area must be contained within the framebuffer dimensions."
+    *
+    * Therefore, the only way the extent of the render area can match that of
+    * the image view is if the render area offset equals (0, 0).
+    */
+   const bool full_surface_op =
+             cmd_state->render_area.extent.width == iview->extent.width &&
+             cmd_state->render_area.extent.height == iview->extent.height;
+   if (full_surface_op)
+      assert(cmd_state->render_area.offset.x == 0 &&
+             cmd_state->render_area.offset.y == 0);
 
-   if (push_state.alloc_size) {
-      anv_batch_emit(&cmd_buffer->batch, GENX(MEDIA_CURBE_LOAD), curbe) {
-         curbe.CURBETotalDataLength    = push_state.alloc_size;
-         curbe.CURBEDataStartAddress   = push_state.offset;
+   /* This variable corresponds to the Pixel Dim column in the table below */
+   struct isl_extent2d px_dim;
+
+   /* Validate that we can perform the HZ operation and that it's necessary. */
+   switch (op) {
+   case BLORP_HIZ_OP_DEPTH_CLEAR:
+      if (cmd_buffer->state.pass->attachments[ds].load_op !=
+          VK_ATTACHMENT_LOAD_OP_CLEAR)
+         return;
+
+      /* Apply alignment restrictions. Despite the BDW PRM mentioning this is
+       * only needed for a depth buffer surface type of D16_UNORM, testing
+       * showed it to be necessary for other depth formats as well
+       * (e.g., D32_FLOAT).
+       */
+#if GEN_GEN == 8
+      /* Pre-SKL, HiZ has an 8x4 sample block. As the number of samples
+       * increases, the number of pixels representable by this block
+       * decreases by a factor of the sample dimensions. Sample dimensions
+       * scale following the MSAA interleaved pattern.
+       *
+       * Sample|Sample|Pixel
+       * Count |Dim   |Dim
+       * ===================
+       *    1  | 1x1  | 8x4
+       *    2  | 2x1  | 4x4
+       *    4  | 2x2  | 4x2
+       *    8  | 4x2  | 2x2
+       *   16  | 4x4  | 2x1
+       *
+       * Table: Pixel Dimensions in a HiZ Sample Block Pre-SKL
+       */
+      /* This variable corresponds to the Sample Dim column in the table
+       * above.
+       */
+      const struct isl_extent2d sa_dim =
+         isl_get_interleaved_msaa_px_size_sa(iview->image->samples);
+      px_dim.w = 8 / sa_dim.w;
+      px_dim.h = 4 / sa_dim.h;
+#elif GEN_GEN >= 9
+      /* SKL+, the sample block becomes a "pixel block" so the expected
+       * pixel dimension is a constant 8x4 px for all sample counts.
+       */
+      px_dim = (struct isl_extent2d) { .w = 8, .h = 4};
+#endif
+
+      if (!full_surface_op) {
+         /* Fast depth clears clear an entire sample block at a time. As a
+          * result, the rectangle must be aligned to the pixel dimensions of
+          * a sample block for a successful operation.
+          *
+          * Fast clears can still work if the offset is aligned and the render
+          * area offset + extent touches the edge of a depth buffer whose extent
+          * is unaligned. This is because each physical HiZ miplevel is padded
+          * by the px_dim. In this case, the size of the clear rectangle will be
+          * padded later on in this function.
+          */
+         if (cmd_state->render_area.offset.x % px_dim.w ||
+             cmd_state->render_area.offset.y % px_dim.h)
+            return;
+         if (cmd_state->render_area.offset.x +
+             cmd_state->render_area.extent.width != iview->extent.width &&
+             cmd_state->render_area.extent.width % px_dim.w)
+            return;
+         if (cmd_state->render_area.offset.y +
+             cmd_state->render_area.extent.height != iview->extent.height &&
+             cmd_state->render_area.extent.height % px_dim.h)
+            return;
+      }
+      break;
+   case BLORP_HIZ_OP_DEPTH_RESOLVE:
+      if (cmd_buffer->state.pass->attachments[ds].store_op !=
+          VK_ATTACHMENT_STORE_OP_STORE)
+         return;
+      break;
+   case BLORP_HIZ_OP_HIZ_RESOLVE:
+      /* If the render area covers the entire surface *and* load_op is either
+       * CLEAR or DONT_CARE then the previous contents of the depth buffer
+       * will be entirely discarded.  In this case, we can skip the HiZ
+       * resolve.
+       *
+       * If the render area is not the full surface, we need to do
+       * the resolve because otherwise data outside the render area may get
+       * garbled by the resolve at the end of the render pass.
+       */
+      if (full_surface_op &&
+          cmd_buffer->state.pass->attachments[ds].load_op !=
+          VK_ATTACHMENT_LOAD_OP_LOAD)
+         return;
+      break;
+   case BLORP_HIZ_OP_NONE:
+      unreachable("Invalid HiZ OP");
+      break;
+   }
+
+   anv_batch_emit(&cmd_buffer->batch, GENX(3DSTATE_WM_HZ_OP), hzp) {
+      switch (op) {
+      case BLORP_HIZ_OP_DEPTH_CLEAR:
+         hzp.StencilBufferClearEnable = VK_IMAGE_ASPECT_STENCIL_BIT &
+                            cmd_state->attachments[ds].pending_clear_aspects;
+         hzp.DepthBufferClearEnable = VK_IMAGE_ASPECT_DEPTH_BIT &
+                            cmd_state->attachments[ds].pending_clear_aspects;
+         hzp.FullSurfaceDepthandStencilClear = full_surface_op;
+         hzp.StencilClearValue =
+            cmd_state->attachments[ds].clear_value.depthStencil.stencil & 0xff;
+
+         /* Mark aspects as cleared */
+         cmd_state->attachments[ds].pending_clear_aspects = 0;
+         break;
+      case BLORP_HIZ_OP_DEPTH_RESOLVE:
+         hzp.DepthBufferResolveEnable = true;
+         break;
+      case BLORP_HIZ_OP_HIZ_RESOLVE:
+         hzp.HierarchicalDepthBufferResolveEnable = true;
+         break;
+      case BLORP_HIZ_OP_NONE:
+         unreachable("Invalid HiZ OP");
+         break;
+      }
+
+      if (op != BLORP_HIZ_OP_DEPTH_CLEAR) {
+         /* The Optimized HiZ resolve rectangle must be the size of the full RT
+          * and aligned to 8x4. The non-optimized Depth resolve rectangle must
+          * be the size of the full RT. The same alignment is assumed to be
+          * required.
+          */
+         hzp.ClearRectangleXMin = 0;
+         hzp.ClearRectangleYMin = 0;
+         hzp.ClearRectangleXMax = align_u32(iview->extent.width, 8);
+         hzp.ClearRectangleYMax = align_u32(iview->extent.height, 4);
+      } else {
+         /* This clear rectangle is aligned */
+         hzp.ClearRectangleXMin = cmd_state->render_area.offset.x;
+         hzp.ClearRectangleYMin = cmd_state->render_area.offset.y;
+         hzp.ClearRectangleXMax = cmd_state->render_area.offset.x +
+            align_u32(cmd_state->render_area.extent.width, px_dim.width);
+         hzp.ClearRectangleYMax = cmd_state->render_area.offset.y +
+            align_u32(cmd_state->render_area.extent.height, px_dim.height);
+      }
+
+
+      /* Due to a hardware issue, this bit MBZ */
+      hzp.ScissorRectangleEnable = false;
+      hzp.NumberofMultisamples = ffs(iview->image->samples) - 1;
+      hzp.SampleMask = 0xFFFF;
+   }
+
+   anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
+      pc.PostSyncOperation = WriteImmediateData;
+      pc.Address =
+         (struct anv_address){ &cmd_buffer->device->workaround_bo, 0 };
+   }
+
+   anv_batch_emit(&cmd_buffer->batch, GENX(3DSTATE_WM_HZ_OP), hzp);
+
+   if (!full_surface_op && op == BLORP_HIZ_OP_DEPTH_CLEAR) {
+      anv_batch_emit(&cmd_buffer->batch, GENX(PIPE_CONTROL), pc) {
+         pc.DepthStallEnable = true;
+         pc.DepthCacheFlushEnable = true;
       }
    }
-
-   assert(prog_data->total_shared <= 64 * 1024);
-   uint32_t slm_size = 0;
-   if (prog_data->total_shared > 0) {
-      /* slm_size is in 4k increments, but must be a power of 2. */
-      slm_size = 4 * 1024;
-      while (slm_size < prog_data->total_shared)
-         slm_size <<= 1;
-      slm_size /= 4 * 1024;
-   }
-
-   struct anv_state state =
-      anv_state_pool_emit(&device->dynamic_state_pool,
-                          GENX(INTERFACE_DESCRIPTOR_DATA), 64,
-                          .KernelStartPointer = pipeline->cs_simd,
-                          .KernelStartPointerHigh = 0,
-                          .BindingTablePointer = surfaces.offset,
-                          .BindingTableEntryCount = 0,
-                          .SamplerStatePointer = samplers.offset,
-                          .SamplerCount = 0,
-                          .ConstantIndirectURBEntryReadLength = push_constant_regs,
-                          .ConstantURBEntryReadOffset = 0,
-                          .BarrierEnable = cs_prog_data->uses_barrier,
-                          .SharedLocalMemorySize = slm_size,
-                          .NumberofThreadsinGPGPUThreadGroup =
-                             pipeline->cs_thread_width_max);
-
-   uint32_t size = GENX(INTERFACE_DESCRIPTOR_DATA_length) * sizeof(uint32_t);
-   anv_batch_emit(&cmd_buffer->batch,
-                  GENX(MEDIA_INTERFACE_DESCRIPTOR_LOAD), mid) {
-      mid.InterfaceDescriptorTotalLength        = size;
-      mid.InterfaceDescriptorDataStartAddress   = state.offset;
-   }
-
-   return VK_SUCCESS;
-}
-
-void
-genX(cmd_buffer_flush_compute_state)(struct anv_cmd_buffer *cmd_buffer)
-{
-   struct anv_pipeline *pipeline = cmd_buffer->state.compute_pipeline;
-   const struct brw_cs_prog_data *cs_prog_data = get_cs_prog_data(pipeline);
-   MAYBE_UNUSED VkResult result;
-
-   assert(pipeline->active_stages == VK_SHADER_STAGE_COMPUTE_BIT);
-
-   bool needs_slm = cs_prog_data->base.total_shared > 0;
-   genX(cmd_buffer_config_l3)(cmd_buffer, needs_slm);
-
-   genX(flush_pipeline_select_gpgpu)(cmd_buffer);
-
-   if (cmd_buffer->state.compute_dirty & ANV_CMD_DIRTY_PIPELINE)
-      anv_batch_emit_batch(&cmd_buffer->batch, &pipeline->batch);
-
-   if ((cmd_buffer->state.descriptors_dirty & VK_SHADER_STAGE_COMPUTE_BIT) ||
-       (cmd_buffer->state.compute_dirty & ANV_CMD_DIRTY_PIPELINE)) {
-      result = flush_compute_descriptor_set(cmd_buffer);
-      assert(result == VK_SUCCESS);
-      cmd_buffer->state.descriptors_dirty &= ~VK_SHADER_STAGE_COMPUTE_BIT;
-   }
-
-   cmd_buffer->state.compute_dirty = 0;
 }
 
 void genX(CmdSetEvent)(

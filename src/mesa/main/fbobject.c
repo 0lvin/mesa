@@ -303,9 +303,21 @@ _mesa_get_fb0_attachment(struct gl_context *ctx, struct gl_framebuffer *fb,
 
    switch (attachment) {
    case GL_FRONT_LEFT:
-      return &fb->Attachment[BUFFER_FRONT_LEFT];
+      /* Front buffers can be allocated on the first use, but
+       * glGetFramebufferAttachmentParameteriv must work even if that
+       * allocation hasn't happened yet. In such case, use the back buffer,
+       * which should be the same.
+       */
+      if (fb->Attachment[BUFFER_FRONT_LEFT].Type == GL_NONE)
+         return &fb->Attachment[BUFFER_BACK_LEFT];
+      else
+         return &fb->Attachment[BUFFER_FRONT_LEFT];
    case GL_FRONT_RIGHT:
-      return &fb->Attachment[BUFFER_FRONT_RIGHT];
+      /* Same as above. */
+      if (fb->Attachment[BUFFER_FRONT_RIGHT].Type == GL_NONE)
+         return &fb->Attachment[BUFFER_BACK_RIGHT];
+      else
+         return &fb->Attachment[BUFFER_FRONT_RIGHT];
    case GL_BACK_LEFT:
       return &fb->Attachment[BUFFER_BACK_LEFT];
    case GL_BACK_RIGHT:
@@ -389,7 +401,8 @@ driver_RenderTexture_is_safe(const struct gl_renderbuffer_attachment *att)
    const struct gl_texture_image *const texImage =
       att->Texture->Image[att->CubeMapFace][att->TextureLevel];
 
-   if (texImage->Width == 0 || texImage->Height == 0 || texImage->Depth == 0)
+   if (!texImage ||
+       texImage->Width == 0 || texImage->Height == 0 || texImage->Depth == 0)
       return false;
 
    if ((texImage->TexObject->Target == GL_TEXTURE_1D_ARRAY
@@ -957,6 +970,7 @@ _mesa_test_framebuffer_completeness(struct gl_context *ctx,
    fb->_AllColorBuffersFixedPoint = GL_TRUE;
    fb->_HasSNormOrFloatColorBuffer = GL_FALSE;
    fb->_HasAttachments = true;
+   fb->_IntegerBuffers = 0;
 
    /* Start at -2 to more easily loop over all attachment points.
     *  -2: depth buffer
@@ -1077,12 +1091,13 @@ _mesa_test_framebuffer_completeness(struct gl_context *ctx,
          continue;
       }
 
-      /* check if integer color */
-      fb->_IntegerColor = _mesa_is_format_integer_color(attFormat);
-
-      /* Update _AllColorBuffersFixedPoint and _HasSNormOrFloatColorBuffer. */
+      /* Update flags describing color buffer datatypes */
       if (i >= 0) {
          GLenum type = _mesa_get_format_datatype(attFormat);
+
+         /* check if integer color */
+         if (_mesa_is_format_integer_color(attFormat))
+            fb->_IntegerBuffers |= (1 << i);
 
          fb->_AllColorBuffersFixedPoint =
             fb->_AllColorBuffersFixedPoint &&
@@ -1287,8 +1302,8 @@ _mesa_IsRenderbuffer(GLuint renderbuffer)
 
 
 static struct gl_renderbuffer *
-allocate_renderbuffer(struct gl_context *ctx, GLuint renderbuffer,
-                      const char *func)
+allocate_renderbuffer_locked(struct gl_context *ctx, GLuint renderbuffer,
+                             const char *func)
 {
    struct gl_renderbuffer *newRb;
 
@@ -1299,10 +1314,8 @@ allocate_renderbuffer(struct gl_context *ctx, GLuint renderbuffer,
       return NULL;
    }
    assert(newRb->AllocStorage);
-   mtx_lock(&ctx->Shared->Mutex);
-   _mesa_HashInsert(ctx->Shared->RenderBuffers, renderbuffer, newRb);
+   _mesa_HashInsertLocked(ctx->Shared->RenderBuffers, renderbuffer, newRb);
    newRb->RefCount = 1; /* referenced by hash table */
-   mtx_unlock(&ctx->Shared->Mutex);
 
    return newRb;
 }
@@ -1336,7 +1349,10 @@ bind_renderbuffer(GLenum target, GLuint renderbuffer, bool allow_user_names)
       }
 
       if (!newRb) {
-         newRb = allocate_renderbuffer(ctx, renderbuffer, "glBindRenderbufferEXT");
+         _mesa_HashLockMutex(ctx->Shared->RenderBuffers);
+         newRb = allocate_renderbuffer_locked(ctx, renderbuffer,
+                                              "glBindRenderbufferEXT");
+         _mesa_HashUnlockMutex(ctx->Shared->RenderBuffers);
       }
    }
    else {
@@ -1396,7 +1412,7 @@ framebuffer_parameteri(struct gl_context *ctx, struct gl_framebuffer *fb,
       * According to the OpenGL ES 3.1 specification section 9.2.1, the
       * GL_FRAMEBUFFER_DEFAULT_LAYERS parameter name is not supported.
       */
-      if (_mesa_is_gles31(ctx)) {
+      if (_mesa_is_gles31(ctx) && !ctx->Extensions.OES_geometry_shader) {
          _mesa_error(ctx, GL_INVALID_ENUM, "%s(pname=0x%x)", func, pname);
          break;
       }
@@ -1469,7 +1485,7 @@ get_framebuffer_parameteriv(struct gl_context *ctx, struct gl_framebuffer *fb,
        * According to the OpenGL ES 3.1 specification section 9.2.3, the
        * GL_FRAMEBUFFER_LAYERS parameter name is not supported.
        */
-      if (_mesa_is_gles31(ctx)) {
+      if (_mesa_is_gles31(ctx) && !ctx->Extensions.OES_geometry_shader) {
          _mesa_error(ctx, GL_INVALID_ENUM, "%s(pname=0x%x)", func, pname);
          break;
       }
@@ -1643,6 +1659,8 @@ create_render_buffers(struct gl_context *ctx, GLsizei n, GLuint *renderbuffers,
    if (!renderbuffers)
       return;
 
+   _mesa_HashLockMutex(ctx->Shared->RenderBuffers);
+
    first = _mesa_HashFindFreeKeyBlock(ctx->Shared->RenderBuffers, n);
 
    for (i = 0; i < n; i++) {
@@ -1650,14 +1668,15 @@ create_render_buffers(struct gl_context *ctx, GLsizei n, GLuint *renderbuffers,
       renderbuffers[i] = name;
 
       if (dsa) {
-         allocate_renderbuffer(ctx, name, func);
+         allocate_renderbuffer_locked(ctx, name, func);
       } else {
          /* insert a dummy renderbuffer into the hash table */
-         mtx_lock(&ctx->Shared->Mutex);
-         _mesa_HashInsert(ctx->Shared->RenderBuffers, name, &DummyRenderbuffer);
-         mtx_unlock(&ctx->Shared->Mutex);
+         _mesa_HashInsertLocked(ctx->Shared->RenderBuffers, name,
+                                &DummyRenderbuffer);
       }
    }
+
+   _mesa_HashUnlockMutex(ctx->Shared->RenderBuffers);
 }
 
 
@@ -2123,7 +2142,7 @@ renderbuffer_storage(struct gl_context *ctx, struct gl_renderbuffer *rb,
       }
 
       if (sample_count_error != GL_NO_ERROR) {
-         _mesa_error(ctx, sample_count_error, "%s(samples)", func);
+         _mesa_error(ctx, sample_count_error, "%s(samples=%d)", func, samples);
          return;
       }
    }
@@ -2684,6 +2703,8 @@ create_framebuffers(GLsizei n, GLuint *framebuffers, bool dsa)
    if (!framebuffers)
       return;
 
+   _mesa_HashLockMutex(ctx->Shared->FrameBuffers);
+
    first = _mesa_HashFindFreeKeyBlock(ctx->Shared->FrameBuffers, n);
 
    for (i = 0; i < n; i++) {
@@ -2693,6 +2714,7 @@ create_framebuffers(GLsizei n, GLuint *framebuffers, bool dsa)
       if (dsa) {
          fb = ctx->Driver.NewFramebuffer(ctx, framebuffers[i]);
          if (!fb) {
+            _mesa_HashUnlockMutex(ctx->Shared->FrameBuffers);
             _mesa_error(ctx, GL_OUT_OF_MEMORY, "%s", func);
             return;
          }
@@ -2700,10 +2722,10 @@ create_framebuffers(GLsizei n, GLuint *framebuffers, bool dsa)
       else
          fb = &DummyFramebuffer;
 
-      mtx_lock(&ctx->Shared->Mutex);
-      _mesa_HashInsert(ctx->Shared->FrameBuffers, name, fb);
-      mtx_unlock(&ctx->Shared->Mutex);
+      _mesa_HashInsertLocked(ctx->Shared->FrameBuffers, name, fb);
    }
+
+   _mesa_HashUnlockMutex(ctx->Shared->FrameBuffers);
 }
 
 
@@ -2971,54 +2993,49 @@ check_textarget(struct gl_context *ctx, int dims, GLenum target,
 {
    bool err = false;
 
-   switch (dims) {
-   case 1:
-      switch (textarget) {
-      case GL_TEXTURE_1D:
-         break;
-      case GL_TEXTURE_1D_ARRAY:
-         err = !ctx->Extensions.EXT_texture_array;
-         break;
-      default:
-         err = true;
-      }
+   switch (textarget) {
+   case GL_TEXTURE_1D:
+      err = dims != 1;
       break;
-   case 2:
-      switch (textarget) {
-      case GL_TEXTURE_2D:
-         break;
-      case GL_TEXTURE_RECTANGLE:
-         err = _mesa_is_gles(ctx)
-            || !ctx->Extensions.NV_texture_rectangle;
-         break;
-      case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
-      case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
-      case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
-      case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
-      case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
-      case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
-         err = !ctx->Extensions.ARB_texture_cube_map;
-         break;
-      case GL_TEXTURE_2D_ARRAY:
-         err = (_mesa_is_gles(ctx) && ctx->Version < 30)
-               || !ctx->Extensions.EXT_texture_array;
-         break;
-      case GL_TEXTURE_2D_MULTISAMPLE:
-      case GL_TEXTURE_2D_MULTISAMPLE_ARRAY:
-         err = (_mesa_is_gles(ctx) ||
-                !ctx->Extensions.ARB_texture_multisample) &&
-               !_mesa_is_gles31(ctx);
-         break;
-      default:
-         err = true;
-      }
+   case GL_TEXTURE_1D_ARRAY:
+      err = dims != 1 || !ctx->Extensions.EXT_texture_array;
       break;
-   case 3:
-      if (textarget != GL_TEXTURE_3D)
-         err = true;
+   case GL_TEXTURE_2D:
+      err = dims != 2;
+      break;
+   case GL_TEXTURE_2D_ARRAY:
+      err = dims != 2 || !ctx->Extensions.EXT_texture_array ||
+            (_mesa_is_gles(ctx) && ctx->Version < 30);
+      break;
+   case GL_TEXTURE_2D_MULTISAMPLE:
+   case GL_TEXTURE_2D_MULTISAMPLE_ARRAY:
+      err = dims != 2 ||
+            !ctx->Extensions.ARB_texture_multisample ||
+            (_mesa_is_gles(ctx) && ctx->Version < 31);
+      break;
+   case GL_TEXTURE_RECTANGLE:
+      err = dims != 2 || _mesa_is_gles(ctx) ||
+            !ctx->Extensions.NV_texture_rectangle;
+      break;
+   case GL_TEXTURE_CUBE_MAP:
+   case GL_TEXTURE_CUBE_MAP_ARRAY:
+      err = true;
+      break;
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      err = dims != 2 || !ctx->Extensions.ARB_texture_cube_map;
+      break;
+   case GL_TEXTURE_3D:
+      err = dims != 3;
       break;
    default:
-      err = true;
+      _mesa_error(ctx, GL_INVALID_ENUM,
+                  "%s(unknown textarget 0x%x)", caller, textarget);
+      return false;
    }
 
    if (err) {
@@ -3233,10 +3250,10 @@ framebuffer_texture_with_dims(int dims, GLenum target,
 
       if ((dims == 3) && !check_layer(ctx, texObj->Target, layer, caller))
          return;
-   }
 
-   if (!check_level(ctx, textarget, level, caller))
-      return;
+      if (!check_level(ctx, textarget, level, caller))
+         return;
+   }
 
    _mesa_framebuffer_texture(ctx, fb, attachment, texObj, textarget, level,
                              layer, GL_FALSE, caller);

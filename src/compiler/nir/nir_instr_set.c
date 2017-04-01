@@ -106,7 +106,7 @@ hash_phi(uint32_t hash, const nir_phi_instr *instr)
    unsigned num_preds = instr->instr.block->predecessors->entries;
    NIR_VLA(nir_phi_src *, srcs, num_preds);
    unsigned i = 0;
-   nir_foreach_phi_src(instr, src) {
+   nir_foreach_phi_src(src, instr) {
       srcs[i++] = src;
    }
 
@@ -228,7 +228,7 @@ nir_srcs_equal(nir_src src1, nir_src src2)
    }
 }
 
-static bool
+bool
 nir_alu_srcs_equal(const nir_alu_instr *alu1, const nir_alu_instr *alu2,
                    unsigned src1, unsigned src2)
 {
@@ -334,7 +334,7 @@ nir_instrs_equal(const nir_instr *instr1, const nir_instr *instr2)
          return false;
 
       return memcmp(load1->value.f32, load2->value.f32,
-                    load1->def.num_components * (load1->def.bit_size / 8)) == 0;
+                    load1->def.num_components * (load1->def.bit_size / 8u)) == 0;
    }
    case nir_instr_type_phi: {
       nir_phi_instr *phi1 = nir_instr_as_phi(instr1);
@@ -343,8 +343,8 @@ nir_instrs_equal(const nir_instr *instr1, const nir_instr *instr2)
       if (phi1->instr.block != phi2->instr.block)
          return false;
 
-      nir_foreach_phi_src(phi1, src1) {
-         nir_foreach_phi_src(phi2, src2) {
+      nir_foreach_phi_src(src1, phi1) {
+         nir_foreach_phi_src(src2, phi2) {
             if (src1->pred == src2->pred) {
                if (!nir_srcs_equal(src1->src, src2->src))
                   return false;
@@ -514,7 +514,7 @@ nir_instr_set_add_or_rewrite(struct set *instr_set, nir_instr *instr)
       nir_instr *match = (nir_instr *) entry->key;
       nir_ssa_def *new_def = nir_instr_get_dest_ssa_def(match);
 
-      /* It's safe to replace a exact instruction with an inexact one as
+      /* It's safe to replace an exact instruction with an inexact one as
        * long as we make it exact.  If we got here, the two instructions are
        * exactly identical in every other way so, once we've set the exact
        * bit, they are the same.

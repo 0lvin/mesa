@@ -56,6 +56,7 @@ lower_reduction(nir_alu_instr *instr, nir_op chan_op, nir_op merge_op,
          nir_alu_src_copy(&chan->src[1], &instr->src[1], chan);
          chan->src[1].swizzle[0] = chan->src[1].swizzle[i];
       }
+      chan->exact = instr->exact;
 
       nir_builder_instr_insert(builder, &chan->instr);
 
@@ -72,7 +73,7 @@ lower_reduction(nir_alu_instr *instr, nir_op chan_op, nir_op merge_op,
    nir_instr_remove(&instr->instr);
 }
 
-static void
+static bool
 lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
 {
    unsigned num_src = nir_op_infos[instr->op].num_inputs;
@@ -89,7 +90,7 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
    case name##3: \
    case name##4: \
       lower_reduction(instr, chan, merge, b); \
-      return;
+      return true;
 
    switch (instr->op) {
    case nir_op_vec4:
@@ -98,11 +99,11 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
       /* We don't need to scalarize these ops, they're the ones generated to
        * group up outputs into a value that can be SSAed.
        */
-      return;
+      return false;
 
    case nir_op_pack_half_2x16:
       if (!b->shader->options->lower_pack_half_2x16)
-         return;
+         return false;
 
       nir_ssa_def *val =
          nir_pack_half_2x16_split(b, nir_channel(b, instr->src[0].src.ssa,
@@ -112,7 +113,7 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
 
       nir_ssa_def_rewrite_uses(&instr->dest.dest.ssa, nir_src_for_ssa(val));
       nir_instr_remove(&instr->instr);
-      return;
+      return true;
 
    case nir_op_unpack_unorm_4x8:
    case nir_op_unpack_snorm_4x8:
@@ -121,11 +122,11 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
       /* There is no scalar version of these ops, unless we were to break it
        * down to bitshifts and math (which is definitely not intended).
        */
-      return;
+      return false;
 
    case nir_op_unpack_half_2x16: {
       if (!b->shader->options->lower_unpack_half_2x16)
-         return;
+         return false;
 
       nir_ssa_def *comps[2];
       comps[0] = nir_unpack_half_2x16_split_x(b, instr->src[0].src.ssa);
@@ -134,7 +135,7 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
 
       nir_ssa_def_rewrite_uses(&instr->dest.dest.ssa, nir_src_for_ssa(vec));
       nir_instr_remove(&instr->instr);
-      return;
+      return true;
    }
 
    case nir_op_pack_uvec2_to_uint: {
@@ -184,11 +185,11 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
 
       nir_ssa_def_rewrite_uses(&instr->dest.dest.ssa, nir_src_for_ssa(val));
       nir_instr_remove(&instr->instr);
-      return;
+      return true;
    }
 
    case nir_op_unpack_double_2x32:
-      return;
+      return false;
 
       LOWER_REDUCTION(nir_op_fdot, nir_op_fmul, nir_op_fadd);
       LOWER_REDUCTION(nir_op_ball_fequal, nir_op_feq, nir_op_iand);
@@ -203,7 +204,7 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
    }
 
    if (instr->dest.dest.ssa.num_components == 1)
-      return;
+      return false;
 
    unsigned num_components = instr->dest.dest.ssa.num_components;
    nir_ssa_def *comps[] = { NULL, NULL, NULL, NULL };
@@ -229,6 +230,7 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
       nir_alu_ssa_dest_init(lower, 1, instr->dest.dest.ssa.bit_size);
       lower->dest.saturate = instr->dest.saturate;
       comps[chan] = &lower->dest.dest.ssa;
+      lower->exact = instr->exact;
 
       nir_builder_instr_insert(b, &lower->instr);
    }
@@ -238,33 +240,40 @@ lower_alu_instr_scalar(nir_alu_instr *instr, nir_builder *b)
    nir_ssa_def_rewrite_uses(&instr->dest.dest.ssa, nir_src_for_ssa(vec));
 
    nir_instr_remove(&instr->instr);
-}
-
-static bool
-lower_alu_to_scalar_block(nir_block *block, void *builder)
-{
-   nir_foreach_instr_safe(block, instr) {
-      if (instr->type == nir_instr_type_alu)
-         lower_alu_instr_scalar(nir_instr_as_alu(instr), builder);
-   }
-
    return true;
 }
 
-static void
+static bool
 nir_lower_alu_to_scalar_impl(nir_function_impl *impl)
 {
    nir_builder builder;
    nir_builder_init(&builder, impl);
+   bool progress = false;
 
-   nir_foreach_block_call(impl, lower_alu_to_scalar_block, &builder);
+   nir_foreach_block(block, impl) {
+      nir_foreach_instr_safe(instr, block) {
+         if (instr->type == nir_instr_type_alu) {
+            progress = lower_alu_instr_scalar(nir_instr_as_alu(instr),
+                                              &builder) || progress;
+         }
+      }
+   }
+
+   nir_metadata_preserve(impl, nir_metadata_block_index |
+                               nir_metadata_dominance);
+
+   return progress;
 }
 
-void
+bool
 nir_lower_alu_to_scalar(nir_shader *shader)
 {
-   nir_foreach_function(shader, function) {
+   bool progress = false;
+
+   nir_foreach_function(function, shader) {
       if (function->impl)
-         nir_lower_alu_to_scalar_impl(function->impl);
+         progress = nir_lower_alu_to_scalar_impl(function->impl) || progress;
    }
+
+   return progress;
 }

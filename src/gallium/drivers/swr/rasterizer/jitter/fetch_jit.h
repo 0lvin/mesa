@@ -80,11 +80,13 @@ enum ComponentEnable
 
 enum ComponentControl
 {
-    NoStore     = 0,
-    StoreSrc    = 1,
-    Store0      = 2,
-    Store1Fp    = 3,
-    Store1Int   = 4,
+    NoStore         = 0,
+    StoreSrc        = 1,
+    Store0          = 2,
+    Store1Fp        = 3,
+    Store1Int       = 4,
+    StoreVertexId   = 5,
+    StoreInstanceId = 6
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -98,12 +100,13 @@ struct FETCH_COMPILE_STATE
     uint32_t cutIndex{ 0xffffffff };
 
     // Options that effect the JIT'd code
-    bool bDisableVGATHER;           // if enabled, FetchJit will generate loads/shuffles instead of VGATHERs
-    bool bDisableIndexOOBCheck;     // if enabled, FetchJit will exclude index OOB check
-    bool bEnableCutIndex{ false };  // compares indices with the cut index and returns a cut mask
+    bool bDisableVGATHER;                   // If enabled, FetchJit will generate loads/shuffles instead of VGATHERs
+    bool bDisableIndexOOBCheck;             // If enabled, FetchJit will exclude index OOB check
+    bool bEnableCutIndex{ false };          // Compares indices with the cut index and returns a cut mask
+    bool bVertexIDOffsetEnable{ false };    // Offset vertexID by StartVertex for non-indexed draws or BaseVertex for indexed draws
 
-    FETCH_COMPILE_STATE(bool useVGATHER = false, bool indexOOBCheck = false) :
-        bDisableVGATHER(useVGATHER), bDisableIndexOOBCheck(indexOOBCheck){};
+    FETCH_COMPILE_STATE(bool disableVGATHER = false, bool diableIndexOOBCheck = false):
+        bDisableVGATHER(disableVGATHER), bDisableIndexOOBCheck(diableIndexOOBCheck){ };
 
     bool operator==(const FETCH_COMPILE_STATE &other) const
     {
@@ -113,6 +116,7 @@ struct FETCH_COMPILE_STATE
         if (bDisableIndexOOBCheck != other.bDisableIndexOOBCheck) return false;
         if (bEnableCutIndex != other.bEnableCutIndex) return false;
         if (cutIndex != other.cutIndex) return false;
+        if (bVertexIDOffsetEnable != other.bVertexIDOffsetEnable) return false;
 
         for(uint32_t i = 0; i < numAttribs; ++i)
         {

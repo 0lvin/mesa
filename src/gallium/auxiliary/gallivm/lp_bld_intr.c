@@ -51,6 +51,7 @@
 #include "lp_bld_intr.h"
 #include "lp_bld_type.h"
 #include "lp_bld_pack.h"
+#include "lp_bld_debug.h"
 
 
 void
@@ -144,8 +145,14 @@ lp_build_intrinsic(LLVMBuilderRef builder,
 
       function = lp_declare_intrinsic(module, name, ret_type, arg_types, num_args);
 
-      if (attr)
-          LLVMAddFunctionAttr(function, attr);
+      /* NoUnwind indicates that the intrinsic never raises a C++ exception.
+       * Set it for all intrinsics.
+       */
+      LLVMAddFunctionAttr(function, attr | LLVMNoUnwindAttribute);
+
+      if (gallivm_debug & GALLIVM_DEBUG_IR) {
+         lp_debug_dump_value(function);
+      }
    }
 
    return LLVMBuildCall(builder, function, args, num_args, "");

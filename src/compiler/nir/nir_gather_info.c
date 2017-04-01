@@ -44,6 +44,7 @@ gather_intrinsic_info(nir_intrinsic_instr *instr, nir_shader *shader)
    case nir_intrinsic_load_primitive_id:
    case nir_intrinsic_load_invocation_id:
    case nir_intrinsic_load_local_invocation_id:
+   case nir_intrinsic_load_local_invocation_index:
    case nir_intrinsic_load_work_group_id:
    case nir_intrinsic_load_num_work_groups:
       shader->info.system_values_read |=
@@ -68,10 +69,10 @@ gather_tex_info(nir_tex_instr *instr, nir_shader *shader)
       shader->info.uses_texture_gather = true;
 }
 
-static bool
-gather_info_block(nir_block *block, void *shader)
+static void
+gather_info_block(nir_block *block, nir_shader *shader)
 {
-   nir_foreach_instr(block, instr) {
+   nir_foreach_instr(instr, block) {
       switch (instr->type) {
       case nir_instr_type_intrinsic:
          gather_intrinsic_info(nir_instr_as_intrinsic(instr), shader);
@@ -86,8 +87,6 @@ gather_info_block(nir_block *block, void *shader)
          break;
       }
    }
-
-   return true;
 }
 
 /**
@@ -127,9 +126,15 @@ nir_shader_gather_info(nir_shader *shader, nir_function_impl *entrypoint)
           shader->stage == MESA_SHADER_FRAGMENT ||
           shader->stage == MESA_SHADER_COMPUTE);
 
+   bool uses_sample_qualifier = false;
    shader->info.inputs_read = 0;
-   foreach_list_typed(nir_variable, var, node, &shader->inputs)
+   foreach_list_typed(nir_variable, var, node, &shader->inputs) {
       shader->info.inputs_read |= get_io_mask(var, shader->stage);
+      uses_sample_qualifier |= var->data.sample;
+   }
+
+   if (shader->stage == MESA_SHADER_FRAGMENT)
+      shader->info.fs.uses_sample_qualifier = uses_sample_qualifier;
 
    /* TODO: Some day we may need to add stream support to NIR */
    shader->info.outputs_written = 0;
@@ -157,5 +162,7 @@ nir_shader_gather_info(nir_shader *shader, nir_function_impl *entrypoint)
       }
    }
 
-   nir_foreach_block_call(entrypoint, gather_info_block, shader);
+   nir_foreach_block(block, entrypoint) {
+      gather_info_block(block, shader);
+   }
 }

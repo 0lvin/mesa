@@ -235,7 +235,7 @@ _mesa_meta_pbo_TexSubImage(struct gl_context *ctx, GLuint dims,
    if (drawFb == NULL)
       goto fail;
 
-   _mesa_bind_framebuffers(ctx, drawFb, tex_image ? readFb : ctx->ReadBuffer);
+   _mesa_bind_framebuffers(ctx, drawFb, readFb);
 
    if (tex_image->TexObject->Target == GL_TEXTURE_1D_ARRAY) {
       assert(depth == 1);
@@ -354,6 +354,9 @@ _mesa_meta_pbo_GetTexSubImage(struct gl_context *ctx, GLuint dims,
        * invalid operation in that case.
        */
       if (need_signed_unsigned_int_conversion(rb->Format, format, type))
+         return false;
+   } else {
+      if (need_signed_unsigned_int_conversion(tex_image->TexFormat, format, type))
          return false;
    }
 

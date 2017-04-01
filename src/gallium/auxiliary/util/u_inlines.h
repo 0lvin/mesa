@@ -136,8 +136,10 @@ pipe_resource_reference(struct pipe_resource **ptr, struct pipe_resource *tex)
    struct pipe_resource *old_tex = *ptr;
 
    if (pipe_reference_described(&(*ptr)->reference, &tex->reference, 
-                                (debug_reference_descriptor)debug_describe_resource))
+                                (debug_reference_descriptor)debug_describe_resource)) {
+      pipe_resource_reference(&old_tex->next, NULL);
       old_tex->screen->resource_destroy(old_tex->screen, old_tex);
+   }
    *ptr = tex;
 }
 
@@ -230,12 +232,12 @@ pipe_surface_equal(struct pipe_surface *s1, struct pipe_surface *s2)
 /**
  * Create a new resource.
  * \param bind  bitmask of PIPE_BIND_x flags
- * \param usage  bitmask of PIPE_USAGE_x flags
+ * \param usage  a PIPE_USAGE_x value
  */
 static inline struct pipe_resource *
 pipe_buffer_create( struct pipe_screen *screen,
 		    unsigned bind,
-		    unsigned usage,
+		    enum pipe_resource_usage usage,
 		    unsigned size )
 {
    struct pipe_resource buffer;
@@ -339,25 +341,8 @@ pipe_buffer_write(struct pipe_context *pipe,
                   unsigned size,
                   const void *data)
 {
-   struct pipe_box box;
-   unsigned access = PIPE_TRANSFER_WRITE;
-
-   if (offset == 0 && size == buf->width0) {
-      access |= PIPE_TRANSFER_DISCARD_WHOLE_RESOURCE;
-   } else {
-      access |= PIPE_TRANSFER_DISCARD_RANGE;
-   }
-
-   u_box_1d(offset, size, &box);
-
-   pipe->transfer_inline_write( pipe,
-                                buf,
-                                0,
-                                access,
-                                &box,
-                                data,
-                                size,
-                                0);
+   /* Don't set any other usage bits. Drivers should derive them. */
+   pipe->buffer_subdata(pipe, buf, PIPE_TRANSFER_WRITE, offset, size, data);
 }
 
 /**
@@ -372,18 +357,10 @@ pipe_buffer_write_nooverlap(struct pipe_context *pipe,
                             unsigned offset, unsigned size,
                             const void *data)
 {
-   struct pipe_box box;
-
-   u_box_1d(offset, size, &box);
-
-   pipe->transfer_inline_write(pipe,
-                               buf,
-                               0,
-                               (PIPE_TRANSFER_WRITE |
-                                PIPE_TRANSFER_UNSYNCHRONIZED),
-                               &box,
-                               data,
-                               0, 0);
+   pipe->buffer_subdata(pipe, buf,
+                        (PIPE_TRANSFER_WRITE |
+                         PIPE_TRANSFER_UNSYNCHRONIZED),
+                        offset, size, data);
 }
 
 
@@ -395,7 +372,7 @@ pipe_buffer_write_nooverlap(struct pipe_context *pipe,
 static inline struct pipe_resource *
 pipe_buffer_create_with_data(struct pipe_context *pipe,
                              unsigned bind,
-                             unsigned usage,
+                             enum pipe_resource_usage usage,
                              unsigned size,
                              const void *ptr)
 {
@@ -626,10 +603,17 @@ static inline void
 util_copy_image_view(struct pipe_image_view *dst,
                      const struct pipe_image_view *src)
 {
-   pipe_resource_reference(&dst->resource, src->resource);
-   dst->format = src->format;
-   dst->access = src->access;
-   dst->u = src->u;
+   if (src) {
+      pipe_resource_reference(&dst->resource, src->resource);
+      dst->format = src->format;
+      dst->access = src->access;
+      dst->u = src->u;
+   } else {
+      pipe_resource_reference(&dst->resource, NULL);
+      dst->format = PIPE_FORMAT_NONE;
+      dst->access = 0;
+      memset(&dst->u, 0, sizeof(dst->u));
+   }
 }
 
 static inline unsigned
@@ -648,6 +632,18 @@ util_max_layer(const struct pipe_resource *r, unsigned level)
    default:
       return 0;
    }
+}
+
+static inline bool
+util_texrange_covers_whole_level(const struct pipe_resource *tex,
+                                 unsigned level, unsigned x, unsigned y,
+                                 unsigned z, unsigned width,
+                                 unsigned height, unsigned depth)
+{
+   return x == 0 && y == 0 && z == 0 &&
+          width == u_minify(tex->width0, level) &&
+          height == u_minify(tex->height0, level) &&
+          depth == util_max_layer(tex, level) + 1;
 }
 
 #ifdef __cplusplus

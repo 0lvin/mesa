@@ -126,6 +126,8 @@ public:
 
    exec_node link;
 
+   virtual void set_is_lhs(bool);
+
 protected:
    /**
     * The only constructor is protected so that only derived class objects can
@@ -196,6 +198,15 @@ enum ast_operators {
 
    ast_sequence,
    ast_aggregate
+
+   /**
+    * Number of possible operators for an ast_expression
+    *
+    * This is done as a define instead of as an additional value in the enum so
+    * that the compiler won't generate spurious messages like "warning:
+    * enumeration value ‘ast_num_operators’ not handled in switch"
+    */
+   #define AST_NUM_OPERATORS (ast_aggregate + 1)
 };
 
 /**
@@ -344,8 +355,8 @@ public:
 
    bool is_single_dimension() const
    {
-      return this->array_dimensions.tail_pred->prev != NULL &&
-             this->array_dimensions.tail_pred->prev->is_head_sentinel();
+      return this->array_dimensions.get_tail_raw()->prev != NULL &&
+             this->array_dimensions.get_tail_raw()->prev->is_head_sentinel();
    }
 
    virtual void print(void) const;
@@ -366,7 +377,8 @@ public:
 
    bool process_qualifier_constant(struct _mesa_glsl_parse_state *state,
                                    const char *qual_indentifier,
-                                   unsigned *value, bool can_be_zero);
+                                   unsigned *value, bool can_be_zero,
+                                   bool must_match = false);
 
    void merge_qualifier(ast_layout_expression *l_expr)
    {
@@ -412,15 +424,6 @@ public:
    virtual void hir_no_rvalue(exec_list *instructions,
                               struct _mesa_glsl_parse_state *state);
 };
-
-/**
- * Number of possible operators for an ast_expression
- *
- * This is done as a define instead of as an additional value in the enum so
- * that the compiler won't generate spurious messages like "warning:
- * enumeration value ‘ast_num_operators’ not handled in switch"
- */
-#define AST_NUM_OPERATORS (ast_sequence + 1)
 
 
 class ast_compound_statement : public ast_node {
@@ -502,6 +505,12 @@ struct ast_type_qualifier {
 	  */
 	 unsigned explicit_index:1;
 
+	 /**
+	  * Flag set if GL_ARB_enhanced_layouts "component" layout
+	  * qualifier is used.
+	  */
+	 unsigned explicit_component:1;
+
          /**
           * Flag set if GL_ARB_shading_language_420pack "binding" layout
           * qualifier is used.
@@ -543,6 +552,11 @@ struct ast_type_qualifier {
           * local_size_x, and so on.
           */
          unsigned local_size:3;
+
+	 /** \name Layout qualifiers for ARB_compute_variable_group_size. */
+	 /** \{ */
+	 unsigned local_size_variable:1;
+	 /** \} */
 
 	 /** \name Layout and memory qualifiers for ARB_shader_image_load_store. */
 	 /** \{ */
@@ -587,6 +601,11 @@ struct ast_type_qualifier {
          unsigned subroutine:1;  /**< Is this marked 'subroutine' */
          unsigned subroutine_def:1; /**< Is this marked 'subroutine' with a list of types */
 	 /** \} */
+
+         /** \name Qualifiers for GL_KHR_blend_equation_advanced */
+         /** \{ */
+         unsigned blend_support:1; /**< Are there any blend_support_ qualifiers */
+         /** \} */
       }
       /** \brief Set of flags, accessed by name. */
       q;
@@ -620,6 +639,14 @@ struct ast_type_qualifier {
     * This field is only valid if \c explicit_index is set.
     */
    ast_expression *index;
+
+   /**
+    * Component specified via GL_ARB_enhaced_layouts
+    *
+    * \note
+    * This field is only valid if \c explicit_component is set.
+    */
+   ast_expression *component;
 
    /** Maximum output vertices in GLSL 1.50 geometry shaders. */
    ast_layout_expression *max_vertices;
@@ -738,8 +765,8 @@ struct ast_type_qualifier {
 
    bool validate_flags(YYLTYPE *loc,
                        _mesa_glsl_parse_state *state,
-                       const char *message,
-                       const ast_type_qualifier &allowed_flags);
+                       const ast_type_qualifier &allowed_flags,
+                       const char *message, const char *name);
 
    ast_subroutine_list *subroutine_list;
 };

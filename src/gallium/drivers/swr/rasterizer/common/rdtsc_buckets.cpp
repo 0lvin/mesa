@@ -30,10 +30,23 @@
 #include "rdtsc_buckets.h"
 #include <inttypes.h>
 
+#if defined(_WIN32)
+#define PATH_SEPARATOR "\\"
+#elif defined(__unix__) || defined(__APPLE__)
+#define PATH_SEPARATOR "/"
+#else
+#error "Unsupported platform"
+#endif
+
 THREAD UINT tlsThreadId = 0;
+
+BucketManager::~BucketManager()
+{
+}
 
 void BucketManager::RegisterThread(const std::string& name)
 {
+
     BUCKET_THREAD newThread;
     newThread.name = name;
     newThread.root.children.reserve(mBuckets.size());
@@ -47,14 +60,6 @@ void BucketManager::RegisterThread(const std::string& name)
     size_t id = mThreads.size();
     newThread.id = (UINT)id;
     tlsThreadId = (UINT)id;
-
-    // open threadviz file if enabled
-    if (mThreadViz)
-    {
-        std::stringstream ss;
-        ss << mThreadVizDir << "\\threadviz_thread." << newThread.id << ".dat";
-        newThread.vizFile = fopen(ss.str().c_str(), "wb");
-    }
 
     // store new thread
     mThreads.push_back(newThread);
@@ -80,7 +85,9 @@ void BucketManager::PrintBucket(FILE* f, UINT level, uint64_t threadCycles, uint
         "        |-> ",
         "            |-> ",
         "                |-> ",
-        "                    |-> "
+        "                    |-> ",
+        "                        |-> ",
+        "                            |-> ",
     };
 
     // compute percent of total cycles used by this bucket
@@ -144,36 +151,8 @@ void BucketManager::PrintThread(FILE* f, const BUCKET_THREAD& thread)
     }
 }
 
-void BucketManager::DumpThreadViz()
-{
-    // ensure all thread data is flushed
-    mThreadMutex.lock();
-    for (auto& thread : mThreads)
-    {
-        fflush(thread.vizFile);
-        fclose(thread.vizFile);
-    }
-    mThreadMutex.unlock();
-
-    // dump bucket descriptions
-    std::stringstream ss;
-    ss << mThreadVizDir << "\\threadviz_buckets.dat";
-
-    FILE* f = fopen(ss.str().c_str(), "wb");
-    for (auto& bucket : mBuckets)
-    {
-        Serialize(f, bucket);
-    }
-    fclose(f);
-}
-
 void BucketManager::PrintReport(const std::string& filename)
 {
-    if (mThreadViz)
-    {
-        DumpThreadViz();
-    }
-    else
     {
         FILE* f = fopen(filename.c_str(), "w");
 
@@ -183,10 +162,20 @@ void BucketManager::PrintReport(const std::string& filename)
             PrintThread(f, thread);
             fprintf(f, "\n");
         }
+
         mThreadMutex.unlock();
 
         fclose(f);
     }
+}
+
+
+void BucketManager::StartCapture()
+{
+
+    printf("Capture Starting\n");
+
+    mCapturing = true;
 }
 
 void BucketManager_StartBucket(BucketManager* pBucketMgr, uint32_t id)

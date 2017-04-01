@@ -99,6 +99,7 @@ nv50_constbufs_validate(struct nv50_context *nv50)
                BCTX_REFN(nv50->bufctx_3d, 3D_CB(s, i), res, RD);
 
                nv50->cb_dirty = 1; /* Force cache flush for UBO. */
+               res->cb_bindings[s] |= 1 << i;
             } else {
                BEGIN_NV04(push, NV50_3D(SET_PROGRAM_CB), 1);
                PUSH_DATA (push, (i << 8) | p | 0);
@@ -172,6 +173,42 @@ nv50_fragprog_validate(struct nv50_context *nv50)
    struct nouveau_pushbuf *push = nv50->base.pushbuf;
    struct nv50_program *fp = nv50->fragprog;
    struct pipe_rasterizer_state *rast = &nv50->rast->pipe;
+
+   if (nv50->zsa && nv50->zsa->pipe.alpha.enabled) {
+      struct pipe_framebuffer_state *fb = &nv50->framebuffer;
+      bool blendable = fb->nr_cbufs == 0 || !fb->cbufs[0] ||
+         nv50->screen->base.base.is_format_supported(
+               &nv50->screen->base.base,
+               fb->cbufs[0]->format,
+               fb->cbufs[0]->texture->target,
+               fb->cbufs[0]->texture->nr_samples,
+               PIPE_BIND_BLENDABLE);
+      /* If we already have alphatest code, we have to keep updating
+       * it. However we only have to have different code if the current RT0 is
+       * non-blendable. Otherwise we just set it to always pass and use the
+       * hardware alpha test.
+       */
+      if (fp->fp.alphatest || !blendable) {
+         uint8_t alphatest = PIPE_FUNC_ALWAYS + 1;
+         if (!blendable)
+            alphatest = nv50->zsa->pipe.alpha.func + 1;
+         if (!fp->fp.alphatest)
+            nv50_program_destroy(nv50, fp);
+         else if (fp->mem && fp->fp.alphatest != alphatest)
+            nouveau_heap_free(&fp->mem);
+
+         fp->fp.alphatest = alphatest;
+      }
+   } else if (fp->fp.alphatest && fp->fp.alphatest != PIPE_FUNC_ALWAYS + 1) {
+      /* Alpha test is disabled but we have a shader where it's filled
+       * in. Make sure to reset the function to 'always', otherwise it'll end
+       * up discarding fragments incorrectly.
+       */
+      if (fp->mem)
+         nouveau_heap_free(&fp->mem);
+
+      fp->fp.alphatest = PIPE_FUNC_ALWAYS + 1;
+   }
 
    if (fp->fp.force_persample_interp != rast->force_persample_interp) {
       /* Force the program to be reuploaded, which will trigger interp fixups
@@ -389,6 +426,7 @@ nv50_fp_linkage_validate(struct nv50_context *nv50)
    uint32_t psiz = 0x000;
    uint32_t interp = fp->fp.interp;
    uint32_t colors = fp->fp.colors;
+   uint32_t clpd_nr = util_last_bit(vp->vp.clip_enable | vp->vp.cull_enable);
    uint32_t lin[4];
    uint8_t map[64];
    uint8_t so_map[64];
@@ -415,7 +453,7 @@ nv50_fp_linkage_validate(struct nv50_context *nv50)
    dummy.linear = 0;
    m = nv50_vec4_map(map, 0, lin, &dummy, &vp->out[0]);
 
-   for (c = 0; c < vp->vp.clpd_nr; ++c)
+   for (c = 0; c < clpd_nr; ++c)
       map[m++] = vp->vp.clpd[c / 4] + (c % 4);
 
    colors |= m << 8; /* adjust BFC0 id */
@@ -522,7 +560,7 @@ nv50_fp_linkage_validate(struct nv50_context *nv50)
    BEGIN_NV04(push, NV50_3D(GP_VIEWPORT_ID_ENABLE), 5);
    PUSH_DATA (push, vp->gp.has_viewport);
    PUSH_DATA (push, colors);
-   PUSH_DATA (push, (vp->vp.clpd_nr << 8) | 4);
+   PUSH_DATA (push, (clpd_nr << 8) | 4);
    PUSH_DATA (push, layerid);
    PUSH_DATA (push, psiz);
 

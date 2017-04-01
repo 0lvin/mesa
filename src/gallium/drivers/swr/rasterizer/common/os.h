@@ -24,6 +24,7 @@
 #ifndef __SWR_OS_H__
 #define __SWR_OS_H__
 
+#include <cstddef>
 #include "core/knobs.h"
 
 #if (defined(FORCE_WINDOWS) || defined(_WIN32)) && !defined(FORCE_LINUX)
@@ -33,9 +34,14 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "Windows.h"
+#include <windows.h>
 #include <intrin.h>
 #include <cstdint>
+
+#if defined(MemoryFence)
+// Windows.h defines MemoryFence as _mm_mfence, but this conflicts with llvm::sys::MemoryFence
+#undef MemoryFence
+#endif
 
 #define OSALIGN(RWORD, WIDTH) __declspec(align(WIDTH)) RWORD
 #define THREAD __declspec(thread)
@@ -48,6 +54,16 @@
 
 #define PRAGMA_WARNING_POP() __pragma(warning(pop))
 
+static inline void *AlignedMalloc(size_t _Size, size_t _Alignment)
+{
+    return _aligned_malloc(_Size, _Alignment);
+}
+
+static inline void AlignedFree(void* p)
+{
+    return _aligned_free(p);
+}
+
 #if defined(_WIN64)
 #define BitScanReverseSizeT BitScanReverse64
 #define BitScanForwardSizeT BitScanForward64
@@ -58,7 +74,7 @@
 #define _mm_popcount_sizeT _mm_popcnt_u32
 #endif
 
-#elif defined(FORCE_LINUX) || defined(__linux__) || defined(__gnu_linux__)
+#elif defined(__APPLE__) || defined(FORCE_LINUX) || defined(__linux__) || defined(__gnu_linux__)
 
 #define SWR_API
 
@@ -70,6 +86,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <limits.h>
 
 typedef void            VOID;
 typedef void*           LPVOID;
@@ -85,16 +102,38 @@ typedef unsigned int    DWORD;
 #undef TRUE
 #define TRUE 1
 
+#define MAX_PATH PATH_MAX
+
 #define OSALIGN(RWORD, WIDTH) RWORD __attribute__((aligned(WIDTH)))
 #define THREAD __thread
 #ifndef INLINE
 #define INLINE __inline
 #endif
 #define DEBUGBREAK asm ("int $3")
+
 #if !defined(__CYGWIN__)
+
+#ifndef __cdecl
 #define __cdecl
+#endif
+#ifndef __stdcall
 #define __stdcall
-#define __declspec(X)
+#endif
+
+#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
+    #define __declspec(x)           __declspec_##x
+    #define __declspec_align(y)     __attribute__((aligned(y)))
+    #define __declspec_deprecated   __attribute__((deprecated))
+    #define __declspec_dllexport
+    #define __declspec_dllimport
+    #define __declspec_noinline     __attribute__((__noinline__))
+    #define __declspec_nothrow      __attribute__((nothrow))
+    #define __declspec_novtable
+    #define __declspec_thread       __thread
+#else
+    #define __declspec(X)
+#endif
+
 #endif
 
 #define GCC_VERSION (__GNUC__ * 10000 \
@@ -111,7 +150,7 @@ uint64_t __rdtsc()
 }
 #endif
 
-#ifndef __clang__
+#if !defined( __clang__) && !defined(__INTEL_COMPILER)
 // Intrinsic not defined in gcc
 static INLINE
 void _mm256_storeu2_m128i(__m128i *hi, __m128i *lo, __m256i a)
@@ -150,7 +189,7 @@ unsigned char _BitScanReverse(unsigned int *Index, unsigned int Mask)
 }
 
 inline
-void *_aligned_malloc(unsigned int size, unsigned int alignment)
+void *AlignedMalloc(unsigned int size, unsigned int alignment)
 {
     void *ret;
     if (posix_memalign(&ret, alignment, size))
@@ -166,16 +205,29 @@ unsigned char _bittest(const LONG *a, LONG b)
     return ((*(unsigned *)(a) & (1 << b)) != 0);
 }
 
+static inline
+void AlignedFree(void* p)
+{
+    free(p);
+}
+
+#define _countof(a) (sizeof(a)/sizeof(*(a)))
+
+#define sprintf_s sprintf
+#define strcpy_s(dst,size,src) strncpy(dst,src,size)
 #define GetCurrentProcessId getpid
+pid_t gettid(void);
+#define GetCurrentThreadId gettid
 
 #define CreateDirectory(name, pSecurity) mkdir(name, 0777)
 
-#define _aligned_free free
 #define InterlockedCompareExchange(Dest, Exchange, Comparand) __sync_val_compare_and_swap(Dest, Comparand, Exchange)
 #define InterlockedExchangeAdd(Addend, Value) __sync_fetch_and_add(Addend, Value)
 #define InterlockedDecrement(Append) __sync_sub_and_fetch(Append, 1)
 #define InterlockedDecrement64(Append) __sync_sub_and_fetch(Append, 1)
 #define InterlockedIncrement(Append) __sync_add_and_fetch(Append, 1)
+#define InterlockedAdd(Addend, Value) __sync_add_and_fetch(Addend, Value)
+#define InterlockedAdd64(Addend, Value) __sync_add_and_fetch(Addend, Value)
 #define _ReadWriteBarrier() asm volatile("" ::: "memory")
 
 #define PRAGMA_WARNING_PUSH_DISABLE(...)
@@ -194,7 +246,16 @@ typedef MEGABYTE    GIGABYTE[1024];
 
 #define OSALIGNLINE(RWORD) OSALIGN(RWORD, 64)
 #define OSALIGNSIMD(RWORD) OSALIGN(RWORD, KNOB_SIMD_BYTES)
+#if ENABLE_AVX512_SIMD16
+#define OSALIGNSIMD16(RWORD) OSALIGN(RWORD, KNOB_SIMD16_BYTES)
+#endif
 
 #include "common/swr_assert.h"
+
+#ifdef __GNUC__
+#define ATTR_UNUSED __attribute__((unused))
+#else
+#define ATTR_UNUSED
+#endif
 
 #endif//__SWR_OS_H__

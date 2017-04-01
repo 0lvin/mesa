@@ -45,20 +45,37 @@ d = 'd'
 # however, be used for backend-requested lowering operations as those need to
 # happen regardless of precision.
 #
-# Variable names are specified as "[#]name[@type]" where "#" inicates that
-# the given variable will only match constants and the type indicates that
+# Variable names are specified as "[#]name[@type][(cond)]" where "#" inicates
+# that the given variable will only match constants and the type indicates that
 # the given variable will only match values from ALU instructions with the
-# given output type.
+# given output type, and (cond) specifies an additional condition function
+# (see nir_search_helpers.h).
 #
 # For constants, you have to be careful to make sure that it is the right
 # type because python is unaware of the source and destination types of the
 # opcodes.
+#
+# All expression types can have a bit-size specified.  For opcodes, this
+# looks like "op@32", for variables it is "a@32" or "a@uint32" to specify a
+# type and size, and for literals, you can write "2.0@32".  In the search half
+# of the expression this indicates that it should only match that particular
+# bit-size.  In the replace half of the expression this indicates that the
+# constructed value should have that bit-size.
 
 optimizations = [
+
+   (('imul', a, '#b@32(is_pos_power_of_two)'), ('ishl', a, ('find_lsb', b))),
+   (('imul', a, '#b@32(is_neg_power_of_two)'), ('ineg', ('ishl', a, ('find_lsb', ('iabs', b))))),
+   (('udiv', a, '#b@32(is_pos_power_of_two)'), ('ushr', a, ('find_lsb', b))),
+   (('idiv', a, '#b@32(is_pos_power_of_two)'), ('imul', ('isign', a), ('ushr', ('iabs', a), ('find_lsb', b))), 'options->lower_idiv'),
+   (('idiv', a, '#b@32(is_neg_power_of_two)'), ('ineg', ('imul', ('isign', a), ('ushr', ('iabs', a), ('find_lsb', ('iabs', b))))), 'options->lower_idiv'),
+   (('umod', a, '#b(is_pos_power_of_two)'),    ('iand', a, ('isub', b, 1))),
+
    (('fneg', ('fneg', a)), a),
    (('ineg', ('ineg', a)), a),
    (('fabs', ('fabs', a)), ('fabs', a)),
    (('fabs', ('fneg', a)), ('fabs', a)),
+   (('fabs', ('u2f', a)), ('u2f', a)),
    (('iabs', ('iabs', a)), ('iabs', a)),
    (('iabs', ('ineg', a)), ('iabs', a)),
    (('~fadd', a, 0.0), a),
@@ -90,15 +107,29 @@ optimizations = [
    (('~flrp', a, b, 1.0), b),
    (('~flrp', a, a, b), a),
    (('~flrp', 0.0, a, b), ('fmul', a, b)),
-   (('~flrp', a, b, ('b2f', c)), ('bcsel', c, b, a), 'options->lower_flrp'),
-   (('flrp', a, b, c), ('fadd', ('fmul', c, ('fsub', b, a)), a), 'options->lower_flrp'),
+   (('~flrp', a, b, ('b2f', c)), ('bcsel', c, b, a), 'options->lower_flrp32'),
+   (('flrp@32', a, b, c), ('fadd', ('fmul', c, ('fsub', b, a)), a), 'options->lower_flrp32'),
+   (('flrp@64', a, b, c), ('fadd', ('fmul', c, ('fsub', b, a)), a), 'options->lower_flrp64'),
    (('ffract', a), ('fsub', a, ('ffloor', a)), 'options->lower_ffract'),
-   (('~fadd', ('fmul', a, ('fadd', 1.0, ('fneg', ('b2f', c)))), ('fmul', b, ('b2f', c))), ('bcsel', c, b, a), 'options->lower_flrp'),
-   (('~fadd', ('fmul', a, ('fadd', 1.0, ('fneg',         c ))), ('fmul', b,         c )), ('flrp', a, b, c), '!options->lower_flrp'),
-   (('~fadd', a, ('fmul', ('b2f', c), ('fadd', b, ('fneg', a)))), ('bcsel', c, b, a), 'options->lower_flrp'),
-   (('~fadd', a, ('fmul',         c , ('fadd', b, ('fneg', a)))), ('flrp', a, b, c), '!options->lower_flrp'),
+   (('~fadd', ('fmul', a, ('fadd', 1.0, ('fneg', ('b2f', c)))), ('fmul', b, ('b2f', c))), ('bcsel', c, b, a), 'options->lower_flrp32'),
+   (('~fadd@32', ('fmul', a, ('fadd', 1.0, ('fneg',         c ))), ('fmul', b,         c )), ('flrp', a, b, c), '!options->lower_flrp32'),
+   (('~fadd@64', ('fmul', a, ('fadd', 1.0, ('fneg',         c ))), ('fmul', b,         c )), ('flrp', a, b, c), '!options->lower_flrp64'),
+   (('~fadd', a, ('fmul', ('b2f', c), ('fadd', b, ('fneg', a)))), ('bcsel', c, b, a), 'options->lower_flrp32'),
+   (('~fadd@32', a, ('fmul',         c , ('fadd', b, ('fneg', a)))), ('flrp', a, b, c), '!options->lower_flrp32'),
+   (('~fadd@64', a, ('fmul',         c , ('fadd', b, ('fneg', a)))), ('flrp', a, b, c), '!options->lower_flrp64'),
    (('ffma', a, b, c), ('fadd', ('fmul', a, b), c), 'options->lower_ffma'),
-   (('~fadd', ('fmul', a, b), c), ('ffma', a, b, c), '!options->lower_ffma'),
+   (('~fadd', ('fmul', a, b), c), ('ffma', a, b, c), 'options->fuse_ffma'),
+
+   # (a * #b + #c) << #d
+   # ((a * #b) << #d) + (#c << #d)
+   # (a * (#b << #d)) + (#c << #d)
+   (('ishl', ('iadd', ('imul', a, '#b'), '#c'), '#d'),
+    ('iadd', ('imul', a, ('ishl', b, d)), ('ishl', c, d))),
+
+   # (a * #b) << #c
+   # a * (#b << #c)
+   (('ishl', ('imul', a, '#b'), '#c'), ('imul', a, ('ishl', b, c))),
+
    # Comparison simplifications
    (('~inot', ('flt', a, b)), ('fge', a, b)),
    (('~inot', ('fge', a, b)), ('flt', a, b)),
@@ -124,7 +155,7 @@ optimizations = [
    (('fge', ('fneg', ('fabs', a)), 0.0), ('feq', a, 0.0)),
    (('bcsel', ('flt', b, a), b, a), ('fmin', a, b)),
    (('bcsel', ('flt', a, b), b, a), ('fmax', a, b)),
-   (('bcsel', ('inot', 'a@bool'), b, c), ('bcsel', a, c, b)),
+   (('bcsel', ('inot', a), b, c), ('bcsel', a, c, b)),
    (('bcsel', a, ('bcsel', a, b, c), d), ('bcsel', a, b, d)),
    (('bcsel', a, True, 'b@bool'), ('ior', a, b)),
    (('fmin', a, a), a),
@@ -178,6 +209,7 @@ optimizations = [
    (('iand', a, 0), 0),
    (('ior', a, a), a),
    (('ior', a, 0), a),
+   (('ior', a, True), True),
    (('fxor', a, a), 0.0),
    (('ixor', a, a), 0),
    (('ixor', a, 0), a),
@@ -214,8 +246,6 @@ optimizations = [
    (('~flog2', ('frcp', a)), ('fneg', ('flog2', a))),
    (('~flog2', ('frsq', a)), ('fmul', -0.5, ('flog2', a))),
    (('~flog2', ('fpow', a, b)), ('fmul', b, ('flog2', a))),
-   (('~fadd', ('flog2', a), ('flog2', b)), ('flog2', ('fmul', a, b))),
-   (('~fadd', ('flog2', a), ('fneg', ('flog2', b))), ('flog2', ('fdiv', a, b))),
    (('~fmul', ('fexp2', a), ('fexp2', b)), ('fexp2', ('fadd', a, b))),
    # Division and reciprocal
    (('~fdiv', 1.0, a), ('frcp', a)),
@@ -229,8 +259,8 @@ optimizations = [
    (('ine', 'a@bool', True), ('inot', a)),
    (('ine', 'a@bool', False), a),
    (('ieq', 'a@bool', False), ('inot', 'a')),
-   (('bcsel', a, True, False), ('ine', a, 0)),
-   (('bcsel', a, False, True), ('ieq', a, 0)),
+   (('bcsel', a, True, False), a),
+   (('bcsel', a, False, True), ('inot', a)),
    (('bcsel', True, b, c), b),
    (('bcsel', False, b, c), c),
    # The result of this should be hit by constant propagation and, in the
@@ -286,10 +316,11 @@ optimizations = [
    (('iadd', '#a', ('iadd', b, '#c')), ('iadd', ('iadd', a, c), b)),
 
    # Misc. lowering
-   (('fmod', a, b), ('fsub', a, ('fmul', b, ('ffloor', ('fdiv', a, b)))), 'options->lower_fmod'),
-   (('frem', a, b), ('fsub', a, ('fmul', b, ('ftrunc', ('fdiv', a, b)))), 'options->lower_fmod'),
-   (('uadd_carry', a, b), ('b2i', ('ult', ('iadd', a, b), a)), 'options->lower_uadd_carry'),
-   (('usub_borrow', a, b), ('b2i', ('ult', a, b)), 'options->lower_usub_borrow'),
+   (('fmod@32', a, b), ('fsub', a, ('fmul', b, ('ffloor', ('fdiv', a, b)))), 'options->lower_fmod32'),
+   (('fmod@64', a, b), ('fsub', a, ('fmul', b, ('ffloor', ('fdiv', a, b)))), 'options->lower_fmod64'),
+   (('frem', a, b), ('fsub', a, ('fmul', b, ('ftrunc', ('fdiv', a, b)))), 'options->lower_fmod32'),
+   (('uadd_carry@32', a, b), ('b2i', ('ult', ('iadd', a, b), a)), 'options->lower_uadd_carry'),
+   (('usub_borrow@32', a, b), ('b2i', ('ult', a, b)), 'options->lower_usub_borrow'),
 
    (('bitfield_insert', 'base', 'insert', 'offset', 'bits'),
     ('bcsel', ('ilt', 31, 'bits'), 'insert',
@@ -371,11 +402,16 @@ optimizations = [
      'options->lower_unpack_snorm_4x8'),
 ]
 
-def fexp2i(exp):
-   # We assume that exp is already in the range [-126, 127].
-   return ('ishl', ('iadd', exp, 127), 23)
+def fexp2i(exp, bits):
+   # We assume that exp is already in the right range.
+   if bits == 32:
+      return ('ishl', ('iadd', exp, 127), 23)
+   elif bits == 64:
+      return ('pack_double_2x32_split', 0, ('ishl', ('iadd', exp, 1023), 20))
+   else:
+      assert False
 
-def ldexp32(f, exp):
+def ldexp(f, exp, bits):
    # First, we clamp exp to a reasonable range.  The maximum possible range
    # for a normal exponent is [-126, 127] and, throwing in denormals, you get
    # a maximum range of [-149, 127].  This means that we can potentially have
@@ -386,7 +422,12 @@ def ldexp32(f, exp):
    # handles a range on exp of [-252, 254] which allows you to create any
    # value (including denorms if the hardware supports it) and to adjust the
    # exponent of any normal value to anything you want.
-   exp = ('imin', ('imax', exp, -252), 254)
+   if bits == 32:
+      exp = ('imin', ('imax', exp, -252), 254)
+   elif bits == 64:
+      exp = ('imin', ('imax', exp, -2044), 2046)
+   else:
+      assert False
 
    # Now we compute two powers of 2, one for exp/2 and one for exp-exp/2.
    # (We use ishr which isn't the same for -1, but the -1 case still works
@@ -396,11 +437,14 @@ def ldexp32(f, exp):
    # that you can get with normalized values.  Instead, we create two powers
    # of two and multiply by them each in turn.  That way the effective range
    # of our exponent is doubled.
-   pow2_1 = fexp2i(('ishr', exp, 1))
-   pow2_2 = fexp2i(('isub', exp, ('ishr', exp, 1)))
+   pow2_1 = fexp2i(('ishr', exp, 1), bits)
+   pow2_2 = fexp2i(('isub', exp, ('ishr', exp, 1)), bits)
    return ('fmul', ('fmul', f, pow2_1), pow2_2)
 
-optimizations += [(('ldexp', 'x', 'exp'), ldexp32('x', 'exp'))]
+optimizations += [
+   (('ldexp@32', 'x', 'exp'), ldexp('x', 'exp', 32)),
+   (('ldexp@64', 'x', 'exp'), ldexp('x', 'exp', 64)),
+]
 
 # Unreal Engine 4 demo applications open-codes bitfieldReverse()
 def bitfield_reverse(u):
@@ -412,7 +456,7 @@ def bitfield_reverse(u):
 
     return step5
 
-optimizations += [(bitfield_reverse('x'), ('bitfield_reverse', 'x'))]
+optimizations += [(bitfield_reverse('x@32'), ('bitfield_reverse', 'x'))]
 
 
 # Add optimizations to handle the case where the result of a ternary is

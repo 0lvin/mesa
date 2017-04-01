@@ -508,7 +508,10 @@ struct PA_STATE_CUT : public PA_STATE
                 (this->*pfnPa)(this->curVertex, false);
             }
 
-            this->curVertex = (this->curVertex + 1) % this->numVerts;
+            this->curVertex++;
+            if (this->curVertex >= this->numVerts) {
+               this->curVertex = 0;
+            }
             this->numRemainingVerts--;
         }
 
@@ -1009,7 +1012,7 @@ struct PA_TESS : PA_STATE
     simdvector& GetSimdVector(uint32_t index, uint32_t slot)
     {
         SWR_ASSERT(0, "%s NOT IMPLEMENTED", __FUNCTION__);
-        static simdvector junk = { 0 };
+        static simdvector junk;
         return junk;
     }
 
@@ -1146,35 +1149,25 @@ private:
 
 // Primitive Assembler factory class, responsible for creating and initializing the correct assembler
 // based on state.
-template <typename IsIndexedT>
+template <typename IsIndexedT, typename IsCutIndexEnabledT>
 struct PA_FACTORY
 {
     PA_FACTORY(DRAW_CONTEXT* pDC, PRIMITIVE_TOPOLOGY in_topo, uint32_t numVerts) : topo(in_topo)
     {
 #if KNOB_ENABLE_CUT_AWARE_PA == TRUE
         const API_STATE& state = GetApiState(pDC);
-        if ((IsIndexedT::value && (
+        if ((IsIndexedT::value && IsCutIndexEnabledT::value && (
             topo == TOP_TRIANGLE_STRIP || topo == TOP_POINT_LIST ||
             topo == TOP_LINE_LIST || topo == TOP_LINE_STRIP ||
-            topo == TOP_TRIANGLE_LIST || topo == TOP_LINE_LIST_ADJ ||
-            topo == TOP_LISTSTRIP_ADJ || topo == TOP_TRI_LIST_ADJ ||
-            topo == TOP_TRI_STRIP_ADJ)) ||
+            topo == TOP_TRIANGLE_LIST)) ||
 
             // non-indexed draws with adjacency topologies must use cut-aware PA until we add support
             // for them in the optimized PA
-            (!IsIndexedT::value && (
-            topo == TOP_LINE_LIST_ADJ || topo == TOP_LISTSTRIP_ADJ || topo == TOP_TRI_LIST_ADJ || topo == TOP_TRI_STRIP_ADJ)))
+            (topo == TOP_LINE_LIST_ADJ || topo == TOP_LISTSTRIP_ADJ || topo == TOP_TRI_LIST_ADJ || topo == TOP_TRI_STRIP_ADJ))
         {
             memset(&indexStore, 0, sizeof(indexStore));
-            DWORD numAttribs;
-            if (_BitScanReverse(&numAttribs, state.feAttribMask))
-            {
-                numAttribs++;
-            }
-            else
-            {
-                numAttribs = 0;
-            }
+            uint32_t numAttribs = state.feNumAttributes;
+
             new (&this->paCut) PA_STATE_CUT(pDC, (uint8_t*)&this->vertexStore[0], MAX_NUM_VERTS_PER_PRIM * KNOB_SIMD_WIDTH, 
                 &this->indexStore[0], numVerts, numAttribs, state.topology, false);
             cutPA = true;
