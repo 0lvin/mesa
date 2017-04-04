@@ -14,10 +14,12 @@ lib@VALLIUM_LIBNAME@_la_LDFLAGS = \
 	$(LD_NO_UNDEFINED)
 
 lib@VALLIUM_LIBNAME@_la_LIBADD = \
+	$(top_builddir)/src/vulkan/wsi/libvulkan_wsi.la \
 	$(top_builddir)/src/gallium/state_trackers/vallium/libvallium.la \
 	$(top_builddir)/src/gallium/auxiliary/libgallium.la \
 	$(top_builddir)/src/compiler/nir/libnir.la \
 	$(top_builddir)/src/util/libmesautil.la \
+	$(XCB_DRI3_LIBS) -lX11-xcb \
 	$(VALLIUM_LIBS) \
 	$(PTHREAD_LIBS) \
 	$(LLVM_LIBS) \

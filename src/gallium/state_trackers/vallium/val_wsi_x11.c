@@ -21,12 +21,16 @@
  * IN THE SOFTWARE.
  */
 
+#include <X11/Xlib-xcb.h>
+#include <X11/xshmfence.h>
 #include <xcb/xcb.h>
 #include <xcb/dri3.h>
 #include <xcb/present.h>
 
 #include <errno.h>
+#include "val_private.h"
 #include "val_wsi.h"
+#include "wsi_common_x11.h"
 
 #include "util/hash_table.h"
 
@@ -398,23 +402,15 @@ VkResult val_CreateXcbSurfaceKHR(
     VkSurfaceKHR*                               pSurface)
 {
    VAL_FROM_HANDLE(val_instance, instance, _instance);
-
+   const VkAllocationCallbacks *alloc;
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR);
 
-   VkIcdSurfaceXcb *surface;
+   if (pAllocator)
+     alloc = pAllocator;
+   else
+     alloc = &instance->alloc;
 
-   surface = val_alloc2(&instance->alloc, pAllocator, sizeof *surface, 8,
-                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (surface == NULL)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-
-   surface->base.platform = VK_ICD_WSI_PLATFORM_XCB;
-   surface->connection = pCreateInfo->connection;
-   surface->window = pCreateInfo->window;
-
-   *pSurface = _VkIcdSurfaceBase_to_handle(&surface->base);
-
-   return VK_SUCCESS;
+   return wsi_create_xcb_surface(alloc, pCreateInfo, pSurface);
 }
 
 struct x11_image {

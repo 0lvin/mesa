@@ -65,7 +65,6 @@ struct val_swapchain {
                              uint32_t image_index);
 };
 
-VAL_DEFINE_NONDISP_HANDLE_CASTS(_VkIcdSurfaceBase, VkSurfaceKHR)
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_swapchain, VkSwapchainKHR)
 
 VkResult val_x11_init_wsi(struct val_instance *instance);

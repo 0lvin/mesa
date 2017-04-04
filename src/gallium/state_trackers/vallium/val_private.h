@@ -21,6 +21,7 @@ typedef struct xcb_connection_t xcb_connection_t;
 typedef uint32_t xcb_visualid_t;
 typedef uint32_t xcb_window_t;
 
+#define VK_USE_PLATFORM_XLIB_KHR
 #define VK_USE_PLATFORM_XCB_KHR
 #define VK_USE_PLATFORM_WAYLAND_KHR
 
@@ -29,6 +30,7 @@ typedef uint32_t xcb_window_t;
 #include <vulkan/vk_icd.h>
 
 #include "val_entrypoints.h"
+#include "wsi_common.h"
 
 #include <assert.h>
 #ifdef __cplusplus
@@ -219,7 +221,7 @@ mesa_to_vk_shader_stage(gl_shader_stage mesa_stage)
         __tmp = (gl_shader_stage)((stage_bits) & VAL_STAGE_MASK);    \
         stage = __builtin_ffs(__tmp) - 1, __tmp;                     \
         __tmp &= ~(1 << (stage)))
-   
+
 struct val_physical_device {
     VK_LOADER_DATA                              _loader_data;
     struct val_instance *                       instance;
@@ -296,7 +298,7 @@ val_image_create(VkDevice _device,
                  const struct val_image_create_info *create_info,
                  const VkAllocationCallbacks* alloc,
                  VkImage *pImage);
-   
+
 struct val_image_view {
    const struct val_image *image; /**< VkImageViewCreateInfo::image */
 
@@ -319,7 +321,7 @@ struct val_subpass {
    /** Subpass has at least one resolve attachment */
    bool                                         has_resolve;
 };
-   
+
 struct val_render_pass_attachment {
    VkFormat                                     format;
    uint32_t                                     samples;
@@ -426,7 +428,7 @@ val_descriptor_set_create(struct val_device *device,
 void
 val_descriptor_set_destroy(struct val_device *device,
                            struct val_descriptor_set *set);
-   
+
 struct val_pipeline_layout {
    struct {
       struct val_descriptor_set_layout *layout;
@@ -481,7 +483,7 @@ struct val_cmd_pool {
 #define VAL_CMD_BIND_VERTEX_BUFFERS 2
 #define VAL_CMD_BIND_DESCRIPTOR_SETS 3
 #define VAL_CMD_BEGIN_RENDER_PASS 4
-#define VAL_CMD_END_RENDER_PASS 5   
+#define VAL_CMD_END_RENDER_PASS 5
 #define VAL_CMD_DRAW 6
 #define VAL_CMD_DYN_SET_VIEWPORT 7
 #define VAL_CMD_COPY_IMAGE_TO_BUFFER 8
@@ -594,7 +596,7 @@ struct val_cmd_buffer_entry {
       struct val_cmd_copy_image copy_image;
    } u;
 };
-      
+
 struct val_cmd_buffer {
    VK_LOADER_DATA                               _loader_data;
 

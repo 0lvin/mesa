@@ -58,7 +58,7 @@ void val_DestroySurfaceKHR(
     const VkAllocationCallbacks*                 pAllocator)
 {
    VAL_FROM_HANDLE(val_instance, instance, _instance);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, _surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
 
    val_free2(&instance->alloc, pAllocator, surface);
 }
@@ -70,7 +70,7 @@ VkResult val_GetPhysicalDeviceSurfaceSupportKHR(
     VkBool32*                                   pSupported)
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, _surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
    struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
 
    return iface->get_support(surface, device, queueFamilyIndex, pSupported);
@@ -82,7 +82,7 @@ VkResult val_GetPhysicalDeviceSurfaceCapabilitiesKHR(
     VkSurfaceCapabilitiesKHR*                   pSurfaceCapabilities)
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, _surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
    struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
 
    return iface->get_capabilities(surface, device, pSurfaceCapabilities);
@@ -95,7 +95,7 @@ VkResult val_GetPhysicalDeviceSurfaceFormatsKHR(
     VkSurfaceFormatKHR*                         pSurfaceFormats)
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, _surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
    struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
 
    return iface->get_formats(surface, device, pSurfaceFormatCount,
@@ -109,7 +109,7 @@ VkResult val_GetPhysicalDeviceSurfacePresentModesKHR(
     VkPresentModeKHR*                           pPresentModes)
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, _surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
    struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
 
    return iface->get_present_modes(surface, device, pPresentModeCount,
@@ -123,7 +123,7 @@ VkResult val_CreateSwapchainKHR(
     VkSwapchainKHR*                              pSwapchain)
 {
    VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(_VkIcdSurfaceBase, surface, pCreateInfo->surface);
+   ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, pCreateInfo->surface);
    struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
    struct val_swapchain *swapchain;
 

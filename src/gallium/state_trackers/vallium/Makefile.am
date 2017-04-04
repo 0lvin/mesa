@@ -6,9 +6,11 @@ vulkan_include_HEADERS =				\
 	$(top_srcdir)/include/vulkan/vulkan.h
 
 AM_CPPFLAGS = \
+	$(XCB_DRI3_CFLAGS) \
 	$(VISIBILITY_CFLAGS) \
 	-I$(top_srcdir)/include \
 	-I$(top_srcdir)/src \
+	-I$(top_srcdir)/src/vulkan/wsi \
 	-I$(top_srcdir)/src/compiler \
 	-I$(top_srcdir)/src/gallium/include \
 	-I$(top_srcdir)/src/gallium/drivers \
@@ -40,6 +42,7 @@ BUILT_SOURCES =                                         \
 # Used when generating entrypoints to filter out unwanted extensions
 VALLIUM_ENTRYPOINT_CPPFLAGS = \
    -I$(top_srcdir)/include/vulkan \
+   -DVK_USE_PLATFORM_XLIB_KHR \
    -DVK_USE_PLATFORM_XCB_KHR \
    -DVK_USE_PLATFORM_WAYLAND_KHR
 
