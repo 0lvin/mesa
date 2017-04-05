@@ -12,15 +12,15 @@ val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
 			 struct pipe_loader_device *pld)
 {
-   device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
-   device->instance = instance;
-   device->pld = pld;
+	device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
+	device->instance = instance;
+	device->pld = pld;
 
-   device->pscreen = pipe_loader_create_screen(device->pld);
-   if (!device->pscreen)
-     return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	device->pscreen = pipe_loader_create_screen(device->pld);
+	if (!device->pscreen)
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   return VK_SUCCESS;
+	return VK_SUCCESS;
 }
 
 static const VkExtensionProperties global_extensions[] = {
@@ -82,18 +82,22 @@ VkResult val_CreateInstance(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
 
-   uint32_t client_version = pCreateInfo->pApplicationInfo ?
-      pCreateInfo->pApplicationInfo->apiVersion :
-      VK_MAKE_VERSION(1, 0, 0);
+	uint32_t client_version;
+	if (pCreateInfo->pApplicationInfo &&
+	    pCreateInfo->pApplicationInfo->apiVersion != 0) {
+		client_version = pCreateInfo->pApplicationInfo->apiVersion;
+	} else {
+		client_version = VK_MAKE_VERSION(1, 0, 0);
+	}
 
-   if (VK_MAKE_VERSION(1, 0, 0) > client_version ||
-       client_version > VK_MAKE_VERSION(1, 0, 3)) {
-      return vk_errorf(VK_ERROR_INCOMPATIBLE_DRIVER,
-                       "Client requested version %d.%d.%d",
-                       VK_VERSION_MAJOR(client_version),
-                       VK_VERSION_MINOR(client_version),
-                       VK_VERSION_PATCH(client_version));
-   }
+	if (VK_MAKE_VERSION(1, 0, 0) > client_version ||
+	    client_version > VK_MAKE_VERSION(1, 0, 0xfff)) {
+		return vk_errorf(VK_ERROR_INCOMPATIBLE_DRIVER,
+				 "Client requested version %d.%d.%d",
+				 VK_VERSION_MAJOR(client_version),
+				 VK_VERSION_MINOR(client_version),
+				 VK_VERSION_PATCH(client_version));
+	}
 
    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
       bool found = false;
@@ -168,52 +172,51 @@ static void val_put_image2(struct dri_drawable *dri_drawable,
 {
    fprintf(stderr, "put image 2 %d,%d %dx%d\n", x, y, width, height);
 }
-                          
+
 static struct drisw_loader_funcs val_sw_lf = {
    .get_image = val_get_image,
    .put_image = val_put_image,
    .put_image2 = val_put_image2,
 };
-   
+
 VkResult val_EnumeratePhysicalDevices(
 				      VkInstance                                  _instance,
 				      uint32_t*                                   pPhysicalDeviceCount,
 				      VkPhysicalDevice*                           pPhysicalDevices)
 {
-   VAL_FROM_HANDLE(val_instance, instance, _instance);
-   VkResult result;
+	VAL_FROM_HANDLE(val_instance, instance, _instance);
+	VkResult result;
 
-   if (instance->physicalDeviceCount < 0) {
+	if (instance->physicalDeviceCount < 0) {
 
-      /* sw only for now */
-      instance->num_devices = pipe_loader_sw_probe(NULL, 0);
+		/* sw only for now */
+		instance->num_devices = pipe_loader_sw_probe(NULL, 0);
 
-      assert(instance->num_devices == 1);
+		assert(instance->num_devices == 1);
 
-      pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf);
+		pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf);
 
+		result = val_physical_device_init(&instance->physicalDevice,
+						instance, &instance->devs[0]);
+		if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
+			instance->physicalDeviceCount = 0;
+		} else if (result == VK_SUCCESS) {
+			instance->physicalDeviceCount = 1;
+		} else {
+			return result;
+		}
+	}
 
-      result = val_physical_device_init(&instance->physicalDevice,
-                                        instance, &instance->devs[0]);
-      if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
-         instance->physicalDeviceCount = 0;
-      } else if (result == VK_SUCCESS) {
-         instance->physicalDeviceCount = 1;
-      } else {
-         return result;
-      }
-   }
+	if (!pPhysicalDevices) {
+		*pPhysicalDeviceCount = instance->physicalDeviceCount;
+	} else if (*pPhysicalDeviceCount >= 1) {
+		pPhysicalDevices[0] = val_physical_device_to_handle(&instance->physicalDevice);
+		*pPhysicalDeviceCount = 1;
+	} else {
+		*pPhysicalDeviceCount = 0;
+	}
 
-   if (!pPhysicalDevices) {
-      *pPhysicalDeviceCount = instance->physicalDeviceCount;
-   } else if (*pPhysicalDeviceCount >= 1) {
-      pPhysicalDevices[0] = val_physical_device_to_handle(&instance->physicalDevice);
-      *pPhysicalDeviceCount = 1;
-   } else {
-      *pPhysicalDeviceCount = 0;
-   }
-
-   return VK_SUCCESS;
+	return VK_SUCCESS;
 }
 
 void val_GetPhysicalDeviceFeatures(
@@ -282,135 +285,135 @@ val_device_get_cache_uuid(void *uuid)
 void val_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
 				     VkPhysicalDeviceProperties *pProperties)
 {
-   VAL_FROM_HANDLE(val_physical_device, pdevice, physicalDevice);
+	VAL_FROM_HANDLE(val_physical_device, pdevice, physicalDevice);
 
-   val_finishme("Get correct values for VkPhysicalDeviceLimits");
+	val_finishme("Get correct values for VkPhysicalDeviceLimits");
 
-   const float time_stamp_base = 80.0;
+	const float time_stamp_base = 80.0;
 
-   VkSampleCountFlags sample_counts = 1u;
+	VkSampleCountFlags sample_counts = 1u;
 
-   VkPhysicalDeviceLimits limits = {
-      .maxImageDimension1D                      = (1 << 14),
-      .maxImageDimension2D                      = (1 << 14),
-      .maxImageDimension3D                      = (1 << 10),
-      .maxImageDimensionCube                    = (1 << 14),
-      .maxImageArrayLayers                      = (1 << 10),
-      .maxTexelBufferElements                   = 128 * 1024 * 1024,
-      .maxUniformBufferRange                    = UINT32_MAX,
-      .maxStorageBufferRange                    = UINT32_MAX,
-      .maxPushConstantsSize                     = MAX_PUSH_CONSTANTS_SIZE,
-      .maxMemoryAllocationCount                 = UINT32_MAX,
-      .maxSamplerAllocationCount                = 64 * 1024,
-      .bufferImageGranularity                   = 64, /* A cache line */
-      .sparseAddressSpaceSize                   = 0,
-      .maxBoundDescriptorSets                   = MAX_SETS,
-      .maxPerStageDescriptorSamplers            = 64,
-      .maxPerStageDescriptorUniformBuffers      = 64,
-      .maxPerStageDescriptorStorageBuffers      = 64,
-      .maxPerStageDescriptorSampledImages       = 64,
-      .maxPerStageDescriptorStorageImages       = 64,
-      .maxPerStageDescriptorInputAttachments    = 64,
-      .maxPerStageResources                     = 128,
-      .maxDescriptorSetSamplers                 = 256,
-      .maxDescriptorSetUniformBuffers           = 256,
-      .maxDescriptorSetUniformBuffersDynamic    = 256,
-      .maxDescriptorSetStorageBuffers           = 256,
-      .maxDescriptorSetStorageBuffersDynamic    = 256,
-      .maxDescriptorSetSampledImages            = 256,
-      .maxDescriptorSetStorageImages            = 256,
-      .maxDescriptorSetInputAttachments         = 256,
-      .maxVertexInputAttributes                 = 32,
-      .maxVertexInputBindings                   = 32,
-      .maxVertexInputAttributeOffset            = 2047,
-      .maxVertexInputBindingStride              = 2048,
-      .maxVertexOutputComponents                = 128,
-      .maxTessellationGenerationLevel           = 0,
-      .maxTessellationPatchSize                 = 0,
-      .maxTessellationControlPerVertexInputComponents = 0,
-      .maxTessellationControlPerVertexOutputComponents = 0,
-      .maxTessellationControlPerPatchOutputComponents = 0,
-      .maxTessellationControlTotalOutputComponents = 0,
-      .maxTessellationEvaluationInputComponents = 0,
-      .maxTessellationEvaluationOutputComponents = 0,
-      .maxGeometryShaderInvocations             = 32,
-      .maxGeometryInputComponents               = 64,
-      .maxGeometryOutputComponents              = 128,
-      .maxGeometryOutputVertices                = 256,
-      .maxGeometryTotalOutputComponents         = 1024,
-      .maxFragmentInputComponents               = 128,
-      .maxFragmentOutputAttachments             = 8,
-      .maxFragmentDualSrcAttachments            = 2,
-      .maxFragmentCombinedOutputResources       = 8,
-      .maxComputeSharedMemorySize               = 32768,
-      .maxComputeWorkGroupCount                 = { 65535, 65535, 65535 },
-      .maxComputeWorkGroupInvocations           = 0,
-      .maxComputeWorkGroupSize = { 0, 0, 0 },
-      .subPixelPrecisionBits                    = 4 /* FIXME */,
-      .subTexelPrecisionBits                    = 4 /* FIXME */,
-      .mipmapPrecisionBits                      = 4 /* FIXME */,
-      .maxDrawIndexedIndexValue                 = UINT32_MAX,
-      .maxDrawIndirectCount                     = UINT32_MAX,
-      .maxSamplerLodBias                        = 16,
-      .maxSamplerAnisotropy                     = 16,
-      .maxViewports                             = MAX_VIEWPORTS,
-      .maxViewportDimensions                    = { (1 << 14), (1 << 14) },
-      .viewportBoundsRange                      = { -16384.0, 16384.0 },
-      .viewportSubPixelBits                     = 13, /* We take a float? */
-      .minMemoryMapAlignment                    = 4096, /* A page */
-      .minTexelBufferOffsetAlignment            = 1,
-      .minUniformBufferOffsetAlignment          = 1,
-      .minStorageBufferOffsetAlignment          = 1,
-      .minTexelOffset                           = -8,
-      .maxTexelOffset                           = 7,
-      .minTexelGatherOffset                     = -8,
-      .maxTexelGatherOffset                     = 7,
-      .minInterpolationOffset                   = 0, /* FIXME */
-      .maxInterpolationOffset                   = 0, /* FIXME */
-      .subPixelInterpolationOffsetBits          = 0, /* FIXME */
-      .maxFramebufferWidth                      = (1 << 14),
-      .maxFramebufferHeight                     = (1 << 14),
-      .maxFramebufferLayers                     = (1 << 10),
-      .framebufferColorSampleCounts             = sample_counts,
-      .framebufferDepthSampleCounts             = sample_counts,
-      .framebufferStencilSampleCounts           = sample_counts,
-      .framebufferNoAttachmentsSampleCounts     = sample_counts,
-      .maxColorAttachments                      = MAX_RTS,
-      .sampledImageColorSampleCounts            = sample_counts,
-      .sampledImageIntegerSampleCounts          = VK_SAMPLE_COUNT_1_BIT,
-      .sampledImageDepthSampleCounts            = sample_counts,
-      .sampledImageStencilSampleCounts          = sample_counts,
-      .storageImageSampleCounts                 = VK_SAMPLE_COUNT_1_BIT,
-      .maxSampleMaskWords                       = 1,
-      .timestampComputeAndGraphics              = false,
-      .timestampPeriod                          = time_stamp_base / (1000 * 1000 * 1000),
-      .maxClipDistances                         = 0 /* FIXME */,
-      .maxCullDistances                         = 0 /* FIXME */,
-      .maxCombinedClipAndCullDistances          = 0 /* FIXME */,
-      .discreteQueuePriorities                  = 1,
-      .pointSizeRange                           = { 0.125, 255.875 },
-      .lineWidthRange                           = { 0.0, 7.9921875 },
-      .pointSizeGranularity                     = (1.0 / 8.0),
-      .lineWidthGranularity                     = (1.0 / 128.0),
-      .strictLines                              = false, /* FINISHME */
-      .standardSampleLocations                  = true,
-      .optimalBufferCopyOffsetAlignment         = 128,
-      .optimalBufferCopyRowPitchAlignment       = 128,
-      .nonCoherentAtomSize                      = 64,
-   };
+	VkPhysicalDeviceLimits limits = {
+		.maxImageDimension1D                      = (1 << 14),
+		.maxImageDimension2D                      = (1 << 14),
+		.maxImageDimension3D                      = (1 << 10),
+		.maxImageDimensionCube                    = (1 << 14),
+		.maxImageArrayLayers                      = (1 << 10),
+		.maxTexelBufferElements                   = 128 * 1024 * 1024,
+		.maxUniformBufferRange                    = UINT32_MAX,
+		.maxStorageBufferRange                    = UINT32_MAX,
+		.maxPushConstantsSize                     = MAX_PUSH_CONSTANTS_SIZE,
+		.maxMemoryAllocationCount                 = UINT32_MAX,
+		.maxSamplerAllocationCount                = 64 * 1024,
+		.bufferImageGranularity                   = 64, /* A cache line */
+		.sparseAddressSpaceSize                   = 0,
+		.maxBoundDescriptorSets                   = MAX_SETS,
+		.maxPerStageDescriptorSamplers            = 64,
+		.maxPerStageDescriptorUniformBuffers      = 64,
+		.maxPerStageDescriptorStorageBuffers      = 64,
+		.maxPerStageDescriptorSampledImages       = 64,
+		.maxPerStageDescriptorStorageImages       = 64,
+		.maxPerStageDescriptorInputAttachments    = 64,
+		.maxPerStageResources                     = 128,
+		.maxDescriptorSetSamplers                 = 256,
+		.maxDescriptorSetUniformBuffers           = 256,
+		.maxDescriptorSetUniformBuffersDynamic    = 256,
+		.maxDescriptorSetStorageBuffers           = 256,
+		.maxDescriptorSetStorageBuffersDynamic    = 256,
+		.maxDescriptorSetSampledImages            = 256,
+		.maxDescriptorSetStorageImages            = 256,
+		.maxDescriptorSetInputAttachments         = 256,
+		.maxVertexInputAttributes                 = 32,
+		.maxVertexInputBindings                   = 32,
+		.maxVertexInputAttributeOffset            = 2047,
+		.maxVertexInputBindingStride              = 2048,
+		.maxVertexOutputComponents                = 128,
+		.maxTessellationGenerationLevel           = 0,
+		.maxTessellationPatchSize                 = 0,
+		.maxTessellationControlPerVertexInputComponents = 0,
+		.maxTessellationControlPerVertexOutputComponents = 0,
+		.maxTessellationControlPerPatchOutputComponents = 0,
+		.maxTessellationControlTotalOutputComponents = 0,
+		.maxTessellationEvaluationInputComponents = 0,
+		.maxTessellationEvaluationOutputComponents = 0,
+		.maxGeometryShaderInvocations             = 32,
+		.maxGeometryInputComponents               = 64,
+		.maxGeometryOutputComponents              = 128,
+		.maxGeometryOutputVertices                = 256,
+		.maxGeometryTotalOutputComponents         = 1024,
+		.maxFragmentInputComponents               = 128,
+		.maxFragmentOutputAttachments             = 8,
+		.maxFragmentDualSrcAttachments            = 2,
+		.maxFragmentCombinedOutputResources       = 8,
+		.maxComputeSharedMemorySize               = 32768,
+		.maxComputeWorkGroupCount                 = { 65535, 65535, 65535 },
+		.maxComputeWorkGroupInvocations           = 0,
+		.maxComputeWorkGroupSize = { 0, 0, 0 },
+		.subPixelPrecisionBits                    = 4 /* FIXME */,
+		.subTexelPrecisionBits                    = 4 /* FIXME */,
+		.mipmapPrecisionBits                      = 4 /* FIXME */,
+		.maxDrawIndexedIndexValue                 = UINT32_MAX,
+		.maxDrawIndirectCount                     = UINT32_MAX,
+		.maxSamplerLodBias                        = 16,
+		.maxSamplerAnisotropy                     = 16,
+		.maxViewports                             = MAX_VIEWPORTS,
+		.maxViewportDimensions                    = { (1 << 14), (1 << 14) },
+		.viewportBoundsRange                      = { -16384.0, 16384.0 },
+		.viewportSubPixelBits                     = 13, /* We take a float? */
+		.minMemoryMapAlignment                    = 4096, /* A page */
+		.minTexelBufferOffsetAlignment            = 1,
+		.minUniformBufferOffsetAlignment          = 1,
+		.minStorageBufferOffsetAlignment          = 1,
+		.minTexelOffset                           = -8,
+		.maxTexelOffset                           = 7,
+		.minTexelGatherOffset                     = -8,
+		.maxTexelGatherOffset                     = 7,
+		.minInterpolationOffset                   = 0, /* FIXME */
+		.maxInterpolationOffset                   = 0, /* FIXME */
+		.subPixelInterpolationOffsetBits          = 0, /* FIXME */
+		.maxFramebufferWidth                      = (1 << 14),
+		.maxFramebufferHeight                     = (1 << 14),
+		.maxFramebufferLayers                     = (1 << 10),
+		.framebufferColorSampleCounts             = sample_counts,
+		.framebufferDepthSampleCounts             = sample_counts,
+		.framebufferStencilSampleCounts           = sample_counts,
+		.framebufferNoAttachmentsSampleCounts     = sample_counts,
+		.maxColorAttachments                      = MAX_RTS,
+		.sampledImageColorSampleCounts            = sample_counts,
+		.sampledImageIntegerSampleCounts          = VK_SAMPLE_COUNT_1_BIT,
+		.sampledImageDepthSampleCounts            = sample_counts,
+		.sampledImageStencilSampleCounts          = sample_counts,
+		.storageImageSampleCounts                 = VK_SAMPLE_COUNT_1_BIT,
+		.maxSampleMaskWords                       = 1,
+		.timestampComputeAndGraphics              = false,
+		.timestampPeriod                          = time_stamp_base / (1000 * 1000 * 1000),
+		.maxClipDistances                         = 0 /* FIXME */,
+		.maxCullDistances                         = 0 /* FIXME */,
+		.maxCombinedClipAndCullDistances          = 0 /* FIXME */,
+		.discreteQueuePriorities                  = 1,
+		.pointSizeRange                           = { 0.125, 255.875 },
+		.lineWidthRange                           = { 0.0, 7.9921875 },
+		.pointSizeGranularity                     = (1.0 / 8.0),
+		.lineWidthGranularity                     = (1.0 / 128.0),
+		.strictLines                              = false, /* FINISHME */
+		.standardSampleLocations                  = true,
+		.optimalBufferCopyOffsetAlignment         = 128,
+		.optimalBufferCopyRowPitchAlignment       = 128,
+		.nonCoherentAtomSize                      = 64,
+	};
 
-   *pProperties = (VkPhysicalDeviceProperties) {
-      .apiVersion = VK_MAKE_VERSION(1, 0, 2),
-      .driverVersion = 1,
-      .vendorID = 0,
-      .deviceID = 0,
-      .deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU,
-      .limits = limits,
-      .sparseProperties = {0}, /* Broadwell doesn't do sparse. */
-   };
+	*pProperties = (VkPhysicalDeviceProperties) {
+		.apiVersion = VK_MAKE_VERSION(1, 0, 2),
+		.driverVersion = 1,
+		.vendorID = 0,
+		.deviceID = 0,
+		.deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU,
+		.limits = limits,
+		.sparseProperties = {0}, /* Broadwell doesn't do sparse. */
+	};
 
-   strcpy(pProperties->deviceName, pdevice->pscreen->get_name(pdevice->pscreen));
-   val_device_get_cache_uuid(pProperties->pipelineCacheUUID);
+	strcpy(pProperties->deviceName, pdevice->pscreen->get_name(pdevice->pscreen));
+	val_device_get_cache_uuid(pProperties->pipelineCacheUUID);
 
 }
 
@@ -462,7 +465,7 @@ PFN_vkVoidFunction val_GetInstanceProcAddr(
 					   VkInstance                                  instance,
 					   const char*                                 pName)
 {
-   return val_lookup_entrypoint(pName);
+	return val_lookup_entrypoint(pName);
 }
 
 /* The loader wants us to expose a second GetInstanceProcAddr function
@@ -476,24 +479,24 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(
 								   VkInstance                                  instance,
 								   const char*                                 pName)
 {
-   return val_GetInstanceProcAddr(instance, pName);
+	return val_GetInstanceProcAddr(instance, pName);
 }
 
 PFN_vkVoidFunction val_GetDeviceProcAddr(
 					 VkDevice                                    device,
 					 const char*                                 pName)
 {
-   return val_lookup_entrypoint(pName);
+	return val_lookup_entrypoint(pName);
 }
 
 
 static VkResult
 val_queue_init(struct val_device *device, struct val_queue *queue)
 {
-   queue->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
-   queue->device = device;
+	queue->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
+	queue->device = device;
 
-   return VK_SUCCESS;
+	return VK_SUCCESS;
 }
 
 static void
@@ -541,9 +544,9 @@ VkResult val_CreateDevice(
       device->alloc = physical_device->instance->alloc;
 
    val_queue_init(device, &device->queue);
-   
+
    device->pscreen = physical_device->pscreen;
-   
+
    *pDevice = val_device_to_handle(device);
 
    return VK_SUCCESS;
@@ -646,7 +649,7 @@ VkResult val_QueueSubmit(
    VAL_FROM_HANDLE(val_queue, queue, _queue);
 //   VAL_FROM_HANDLE(val_fence, fence, _fence);
    struct val_device *device = queue->device;
-   
+
    for (uint32_t i = 0; i < submitCount; i++) {
       for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; j++) {
          VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer,
@@ -675,32 +678,38 @@ VkResult val_AllocateMemory(
 			    const VkAllocationCallbacks*                pAllocator,
 			    VkDeviceMemory*                             pMem)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   struct val_device_memory *mem;
-   assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	struct val_device_memory *mem;
+	assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
 
-   if (pAllocateInfo->allocationSize == 0) {
-      /* Apparently, this is allowed */
-      *pMem = VK_NULL_HANDLE;
-      return VK_SUCCESS;
-   }
-   
-   mem = val_alloc2(&device->alloc, pAllocator, sizeof(*mem), 8,
-                    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (mem == NULL)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	if (pAllocateInfo->allocationSize == 0) {
+		/* Apparently, this is allowed */
+		*pMem = VK_NULL_HANDLE;
+		return VK_SUCCESS;
+	}
 
-   mem->pmem = device->pscreen->allocate_memory(device->pscreen, pAllocateInfo->allocationSize);
-   if (!mem->pmem) {
-      val_free2(&device->alloc, pAllocator, mem);
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-   }
+	mem = val_alloc2(&device->alloc, pAllocator, sizeof(*mem), 8,
+			    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (mem == NULL)
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   mem->type_index = pAllocateInfo->memoryTypeIndex;
+	if (!device->pscreen->allocate_memory) {
+		printf("Can't allocate memory %s\n",
+			device->pscreen->get_name(device->pscreen));
+		val_free2(&device->alloc, pAllocator, mem);
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	}
 
-   *pMem = val_device_memory_to_handle(mem);
+	if (!mem->pmem) {
+		val_free2(&device->alloc, pAllocator, mem);
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	}
 
-   return VK_SUCCESS;
+	mem->type_index = pAllocateInfo->memoryTypeIndex;
+
+	*pMem = val_device_memory_to_handle(mem);
+
+	return VK_SUCCESS;
 }
 
 void val_FreeMemory(
@@ -739,7 +748,7 @@ VkResult val_MapMemory(
    }
 
    map = device->pscreen->map_memory(device->pscreen, mem->pmem);
-   
+
    *ppData = map + offset;
    return VK_SUCCESS;
 }
@@ -748,13 +757,13 @@ void val_UnmapMemory(
 		     VkDevice                                    _device,
 		     VkDeviceMemory                              _memory)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 
-   if (mem == NULL)
-      return;
+	if (mem == NULL)
+		return;
 
-   device->pscreen->unmap_memory(device->pscreen, mem->pmem);
+	device->pscreen->unmap_memory(device->pscreen, mem->pmem);
 }
 
 VkResult val_FlushMappedMemoryRanges(
