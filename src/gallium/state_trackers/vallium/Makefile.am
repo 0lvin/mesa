@@ -39,18 +39,11 @@ BUILT_SOURCES =                                         \
 	val_entrypoints.h                               \
 	val_entrypoints.c
 
-# Used when generating entrypoints to filter out unwanted extensions
-VALLIUM_ENTRYPOINT_CPPFLAGS = \
-   -I$(top_srcdir)/include/vulkan \
-   -DVK_USE_PLATFORM_XLIB_KHR \
-   -DVK_USE_PLATFORM_XCB_KHR \
-   -DVK_USE_PLATFORM_WAYLAND_KHR
+val_entrypoints.h : val_entrypoints_gen.py $(vulkan_include_HEADERS)
+	$(AM_V_GEN) cat $(vulkan_include_HEADERS) | $(PYTHON2) $< header > $@
 
-val_entrypoints.h : anv_entrypoints_gen.py $(vulkan_include_HEADERS)
-	$(AM_V_GEN) cat $(vulkan_include_HEADERS) | $(CPP) $(VALLIUM_ENTRYPOINT_CPPFLAGS) - | $(PYTHON2) $< header > $@
-
-val_entrypoints.c : anv_entrypoints_gen.py $(vulkan_include_HEADERS)
-	$(AM_V_GEN) cat $(vulkan_include_HEADERS) | $(CPP) $(VALLIUM_ENTRYPOINT_CPPFLAGS) - | $(PYTHON2) $< code > $@
+val_entrypoints.c : val_entrypoints_gen.py $(vulkan_include_HEADERS)
+	$(AM_V_GEN) cat $(vulkan_include_HEADERS) | $(PYTHON2) $< code > $@
 
 libvallium_la_SOURCES = $(VALLIUM_SOURCES) $(BUILT_SOURCES)
 

@@ -52,6 +52,32 @@ def hash(name):
 
     return h
 
+def get_platform_guard_macro(name):
+    if "Xlib" in name:
+        return "VK_USE_PLATFORM_XLIB_KHR"
+    elif "Xcb" in name:
+        return "VK_USE_PLATFORM_XCB_KHR"
+    elif "Wayland" in name:
+        return "VK_USE_PLATFORM_WAYLAND_KHR"
+    elif "Mir" in name:
+        return "VK_USE_PLATFORM_MIR_KHR"
+    elif "Android" in name:
+        return "VK_USE_PLATFORM_ANDROID_KHR"
+    elif "Win32" in name:
+        return "VK_USE_PLATFORM_WIN32_KHR"
+    else:
+        return None
+
+def print_guard_start(name):
+    guard = get_platform_guard_macro(name)
+    if guard is not None:
+        print "#ifdef {0}".format(guard)
+
+def print_guard_end(name):
+    guard = get_platform_guard_macro(name)
+    if guard is not None:
+        print "#endif // {0}".format(guard)
+
 opt_header = False
 opt_code = False
 
@@ -87,14 +113,23 @@ if opt_header:
     print "      struct {"
 
     for type, name, args, num, h in entrypoints:
-        print "         %s (*%s)%s;" % (type, name, args)
+        guard = get_platform_guard_macro(name)
+        if guard is not None:
+            print "#ifdef {0}".format(guard)
+            print "         %s (*%s)%s;" % (type, name, args)
+            print "#else"
+            print "         void *{0};".format(name)
+            print "#endif"
+        else:
+            print "         %s (*%s)%s;" % (type, name, args)
     print "      };\n"
     print "   };\n"
     print "};\n"
 
     for type, name, args, num, h in entrypoints:
+        print_guard_start(name)
         print "%s %s_%s%s;" % (type, prefix, name, args)
-        print "%s %s_validate_%s%s;" % (type, prefix, name, args)
+        print_guard_end(name)
     exit()
 
 
@@ -160,42 +195,32 @@ for type, name, args, num, h in entrypoints:
     print "   { %5d, 0x%08x }," % (offsets[num], h)
 print "};\n"
 
-for layer in [ prefix, "validate" ]:
+for layer in [ prefix]:
     for type, name, args, num, h in entrypoints:
-        print "%s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
+        guard = get_platform_guard_macro(name)
+        if guard is not None:
+            print "#ifdef {0}".format(guard)
+            print "    %s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
+            print "#endif"
+        else:
+            print "    %s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
     print "\nconst struct %s_dispatch_table %s_layer = {" % (prefix, layer)
     for type, name, args, num, h in entrypoints:
-        print "   .%s = %s_%s," % (name, layer, name)
+        guard = get_platform_guard_macro(name)
+        if guard is not None:
+            print "#ifdef {0}".format(guard)
+            print "   .%s = %s_%s," % (name, layer, name)
+            print "#else"
+            print "   .%s = NULL," % (name)
+            print "#endif"
+        else:
+            print "   .%s = %s_%s," % (name, layer, name)
     print "};\n"
 
 print """
-#ifdef DEBUG
-static bool enable_validate = true;
-#else
-static bool enable_validate = false;
-#endif
-
-/* We can't use symbols that need resolving (like, oh, getenv) in the resolve
- * function. This means that we have to determine whether or not to use the
- * validation layer sometime before that. The constructor function attribute asks
- * the dynamic linker to invoke determine_validate() at dlopen() time which
- * works.
- */
-static void __attribute__ ((constructor))
-determine_validate(void)
-{
-   const char *s = getenv("ANV_VALIDATE");
-
-   if (s)
-      enable_validate = atoi(s);
-}
-
 void * __attribute__ ((noinline))
 %s_resolve_entrypoint(uint32_t index)
 {
-   if (enable_validate && validate_layer.entrypoints[index])
-      return validate_layer.entrypoints[index];
-
    return %s_layer.entrypoints[index];
 }
 """ % (prefix, prefix)
@@ -205,8 +230,15 @@ void * __attribute__ ((noinline))
 # lets the resolver look it up in the table.
 
 for type, name, args, num, h in entrypoints:
-    print "static void *resolve_%s(void) { return %s_resolve_entrypoint(%d); }" % (name, prefix, num)
-    print "%s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));\n" % (type, name, args, name)
+    guard = get_platform_guard_macro(name)
+    if guard is not None:
+        print "#ifdef {0}".format(guard)
+        print "    static void *resolve_%s(void) { return %s_resolve_entrypoint(%d); }" % (name, prefix, num)
+        print "    %s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));" % (type, name, args, name)
+        print "#endif"
+    else:
+        print "static void *resolve_%s(void) { return %s_resolve_entrypoint(%d); }" % (name, prefix, num)
+        print "%s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));\n" % (type, name, args, name)
 
 
 # Now generate the hash table used for entry point look up.  This is a
@@ -250,7 +282,7 @@ for i in xrange(0, hash_size, 8):
             print "0x%04x," % (map[j] & 0xffff),
     print
 
-print "};"    
+print "};"
 
 # Finally we generate the hash table lookup function.  The hash function and
 # linear probing algorithm matches the hash table generated above.
