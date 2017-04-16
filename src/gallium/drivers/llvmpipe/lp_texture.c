@@ -333,7 +333,6 @@ llvmpipe_resource_create_unbacked(struct pipe_screen *screen,
    if (!pt)
       return pt;
    lpr = llvmpipe_resource(pt);
-   lpr->backable = true;
    lpr->backed = false;
    *size_required = lpr->size_required;
    return pt;
@@ -816,7 +815,7 @@ llvmpipe_print_resources(void)
 
 static struct pipe_memory_allocation *llvmpipe_allocate_memory(struct pipe_screen *screen, uint64_t size)
 {
-   void *mem = malloc(size);
+   void * mem = malloc(size);
    return mem;
 }
 
@@ -833,9 +832,6 @@ static void llvmpipe_resource_allocate_backing(struct pipe_screen *screen,
 {
    struct llvmpipe_resource *lpr = llvmpipe_resource(pt);
 
-   if (!lpr->backable)
-      return;
-
    lpr->data = (char *)pmem + offset;
    lpr->backed = true;
    lpr->backing_offset = offset;
@@ -845,9 +841,6 @@ static void llvmpipe_resource_remove_backing(struct pipe_screen *screen,
                                              struct pipe_resource *pt)
 {
    struct llvmpipe_resource *lpr = llvmpipe_resource(pt);
-
-   if (!lpr->backable)
-      return;
 
    if (!lpr->backed)
       return;

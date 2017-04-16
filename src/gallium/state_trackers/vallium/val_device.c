@@ -694,7 +694,7 @@ VkResult val_AllocateMemory(
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
 	if (!device->pscreen->allocate_memory) {
-		printf("Can't allocate memory %s\n",
+		fprintf(stderr, "Can't allocate memory %s\n",
 			device->pscreen->get_name(device->pscreen));
 		val_free2(&device->alloc, pAllocator, mem);
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -717,18 +717,17 @@ void val_FreeMemory(
 		    VkDeviceMemory                              _mem,
 		    const VkAllocationCallbacks*                pAllocator)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_device_memory, mem, _mem);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_device_memory, mem, _mem);
 
-   if (mem == NULL)
-      return;
+	if (mem == NULL)
+		return;
 
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
 
-   device->pscreen->free_memory(device->pscreen, mem->pmem);
-   val_free2(&device->alloc, pAllocator, mem);
-
+	device->pscreen->free_memory(device->pscreen, mem->pmem);
+	val_free2(&device->alloc, pAllocator, mem);
 }
 
 VkResult val_MapMemory(

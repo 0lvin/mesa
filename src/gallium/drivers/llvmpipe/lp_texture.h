@@ -89,7 +89,6 @@ struct llvmpipe_resource
    unsigned timestamp;
 
    uint64_t size_required;
-   boolean backable;
    boolean backed;
    uint64_t backing_offset;
 
