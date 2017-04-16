@@ -1187,6 +1187,8 @@ static void si_emit_db_render_state(struct si_context *sctx, struct r600_atom *s
 static uint32_t si_translate_colorformat(enum pipe_format format)
 {
 	const struct util_format_description *desc = util_format_description(format);
+	if (!desc)
+		return V_028C70_COLOR_INVALID;
 
 #define HAS_SIZE(x,y,z,w) \
 	(desc->channel[0].size == (x) && desc->channel[1].size == (y) && \
@@ -1336,6 +1338,9 @@ static uint32_t si_translate_texformat(struct pipe_screen *screen,
 					 sscreen->b.info.drm_major == 3;
 	bool uniform = true;
 	int i;
+
+	if (!desc)
+		goto out_unknown;
 
 	/* Colorspace (return non-RGB formats directly). */
 	switch (desc->colorspace) {
@@ -1797,6 +1802,9 @@ static bool si_is_vertex_format_supported(struct pipe_screen *screen, enum pipe_
 	unsigned data_format;
 
 	desc = util_format_description(format);
+	if (!desc)
+		return false;
+
 	first_non_void = util_format_get_first_non_void_channel(format);
 	data_format = si_translate_buffer_dataformat(screen, desc, first_non_void);
 	return data_format != V_008F0C_BUF_DATA_FORMAT_INVALID;

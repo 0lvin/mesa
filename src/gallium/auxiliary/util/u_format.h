@@ -1193,6 +1193,9 @@ util_format_get_first_non_void_channel(enum pipe_format format)
    const struct util_format_description *desc = util_format_description(format);
    int i;
 
+   if (!desc)
+      return -1;
+
    for (i = 0; i < 4; i++)
       if (desc->channel[i].type != UTIL_FORMAT_TYPE_VOID)
          break;

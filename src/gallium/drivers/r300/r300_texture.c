@@ -182,6 +182,8 @@ uint32_t r300_translate_texformat(enum pipe_format format,
 
     format = r300_unbyteswap_array_format(format);
     desc = util_format_description(format);
+    if (!desc)
+        return ~0; /* Unsupported/unknown. */
 
     /* Colorspace (return non-RGB formats directly). */
     switch (desc->colorspace) {
@@ -601,6 +603,8 @@ static uint32_t r300_translate_out_fmt(enum pipe_format format)
 
     format = r300_unbyteswap_array_format(format);
     desc = util_format_description(format);
+    if (!desc)
+        return ~0; /* Unsupported/unknown. */
 
     /* Find the first non-VOID channel. */
     for (i = 0; i < 4; i++) {
