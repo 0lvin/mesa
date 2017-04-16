@@ -6,7 +6,6 @@ vulkan_include_HEADERS =				\
 	$(top_srcdir)/include/vulkan/vulkan.h
 
 AM_CPPFLAGS = \
-	$(XCB_DRI3_CFLAGS) \
 	$(VISIBILITY_CFLAGS) \
 	-I$(top_srcdir)/include \
 	-I$(top_srcdir)/src \
@@ -17,6 +16,22 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/src/gallium/auxiliary \
 	-I$(top_srcdir)/src/gallium/winsys \
 	-I$(srcdir)
+
+if HAVE_PLATFORM_X11
+
+AM_CPPFLAGS += \
+	$(XCB_DRI3_CFLAGS) \
+	-DVK_USE_PLATFORM_XCB_KHR \
+	-DVK_USE_PLATFORM_XLIB_KHR
+
+endif
+
+if HAVE_PLATFORM_WAYLAND
+
+AM_CPPFLAGS += \
+	-DVK_USE_PLATFORM_WAYLAND_KHR
+
+endif
 
 VALLIUM_SOURCES = \
 	val_blit.c \

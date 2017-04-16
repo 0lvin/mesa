@@ -17,6 +17,7 @@ lib@VALLIUM_LIBNAME@_la_LIBADD = \
 	$(top_builddir)/src/vulkan/wsi/libvulkan_wsi.la \
 	$(top_builddir)/src/gallium/state_trackers/vallium/libvallium.la \
 	$(top_builddir)/src/gallium/auxiliary/libgallium.la \
+	$(top_builddir)/src/gallium/auxiliary/libgalliumvl.la \
 	$(top_builddir)/src/compiler/nir/libnir.la \
 	$(top_builddir)/src/util/libmesautil.la \
 	$(XCB_DRI3_LIBS) -lX11-xcb \
@@ -32,8 +33,27 @@ TARGET_DRIVERS =
 TARGET_CPPFLAGS =
 TARGET_LIB_DEPS =
 
+include $(top_srcdir)/src/gallium/drivers/i915/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/ilo/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/nouveau/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/r300/Automake.inc
+include $(top_srcdir)/src/gallium/drivers/r600/Automake.inc
+include $(top_srcdir)/src/gallium/drivers/radeonsi/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/svga/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/freedreno/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/vc4/Automake.inc
+
+include $(top_srcdir)/src/gallium/drivers/virgl/Automake.inc
+
 include $(top_srcdir)/src/gallium/drivers/softpipe/Automake.inc
 include $(top_srcdir)/src/gallium/drivers/llvmpipe/Automake.inc
+include $(top_srcdir)/src/gallium/drivers/swr/Automake.inc
 
 if HAVE_GALLIUM_STATIC_TARGETS
 
