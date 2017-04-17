@@ -223,8 +223,6 @@ void val_GetPhysicalDeviceFeatures(
 				   VkPhysicalDevice                            physicalDevice,
 				   VkPhysicalDeviceFeatures*                   pFeatures)
 {
-	VAL_FROM_HANDLE(val_physical_device, pdevice, physicalDevice);
-
 	*pFeatures = (VkPhysicalDeviceFeatures) {
 		.robustBufferAccess                       = true,
 		.fullDrawIndexUint32                      = true,
@@ -511,7 +509,6 @@ VkResult val_CreateDevice(
 			  VkDevice*                                   pDevice)
 {
    VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
-   VkResult result;
    struct val_device *device;
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
@@ -693,17 +690,15 @@ VkResult val_AllocateMemory(
 	if (mem == NULL)
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-	if (!device->pscreen->allocate_memory) {
-		fprintf(stderr, "Can't allocate memory %s\n",
-			device->pscreen->get_name(device->pscreen));
-		val_free2(&device->alloc, pAllocator, mem);
-		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-	}
-
+	uint64_t alloc_size = align_u64(pAllocateInfo->allocationSize, 4096);
+	mem->pmem = vk_alloc2(&device->alloc, pAllocator, alloc_size, 8,
+			  VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 	if (!mem->pmem) {
 		val_free2(&device->alloc, pAllocator, mem);
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 	}
+
+	mem->map_size = alloc_size;
 
 	mem->type_index = pAllocateInfo->memoryTypeIndex;
 
@@ -726,7 +721,7 @@ void val_FreeMemory(
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
 
-	device->pscreen->free_memory(device->pscreen, mem->pmem);
+	val_free2(&device->alloc, pAllocator, mem->pmem);
 	val_free2(&device->alloc, pAllocator, mem);
 }
 

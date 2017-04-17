@@ -548,18 +548,6 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->surface_destroy = softpipe_surface_destroy;
 }
 
-static struct pipe_memory_allocation *softpipe_allocate_memory(struct pipe_screen *screen, uint64_t size)
-{
-   void *mem = malloc(size);
-   return mem;
-}
-
-static void softpipe_free_memory(struct pipe_screen *screen,
-                                 struct pipe_memory_allocation *pmem)
-{
-   free(pmem);
-}
-
 static void softpipe_resource_allocate_backing(struct pipe_screen *screen,
                                                struct pipe_resource *pt,
                                                struct pipe_memory_allocation *pmem,
@@ -607,8 +595,6 @@ softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
    screen->can_create_resource = softpipe_can_create_resource;
    screen->resource_create_unbacked = softpipe_resource_create_unbacked;
 
-   screen->allocate_memory = softpipe_allocate_memory;
-   screen->free_memory = softpipe_free_memory;
    screen->map_memory = softpipe_map_memory;
    screen->unmap_memory = softpipe_unmap_memory;
 

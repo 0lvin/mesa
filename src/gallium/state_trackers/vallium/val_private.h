@@ -21,10 +21,6 @@ typedef struct xcb_connection_t xcb_connection_t;
 typedef uint32_t xcb_visualid_t;
 typedef uint32_t xcb_window_t;
 
-#define VK_USE_PLATFORM_XLIB_KHR
-#define VK_USE_PLATFORM_XCB_KHR
-#define VK_USE_PLATFORM_WAYLAND_KHR
-
 #define VK_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_icd.h>
@@ -150,6 +146,13 @@ void __val_finishme(const char *file, int line, const char *format, ...)
       val_finishme("stub %s", __func__); \
       return; \
    } while (0)
+
+static inline uint64_t
+align_u64(uint64_t v, uint64_t a)
+{
+	assert(a != 0 && a == (a & -a));
+	return (v + a - 1) & ~(a - 1);
+}
 
 static inline void *
 val_alloc(const VkAllocationCallbacks *alloc,

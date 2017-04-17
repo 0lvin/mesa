@@ -813,18 +813,6 @@ llvmpipe_print_resources(void)
 }
 #endif
 
-static struct pipe_memory_allocation *llvmpipe_allocate_memory(struct pipe_screen *screen, uint64_t size)
-{
-   void * mem = malloc(size);
-   return mem;
-}
-
-static void llvmpipe_free_memory(struct pipe_screen *screen,
-                                 struct pipe_memory_allocation *pmem)
-{
-   free(pmem);
-}
-
 static void llvmpipe_resource_allocate_backing(struct pipe_screen *screen,
                                                struct pipe_resource *pt,
                                                struct pipe_memory_allocation *pmem,
@@ -884,8 +872,6 @@ llvmpipe_init_screen_resource_funcs(struct pipe_screen *screen)
    screen->can_create_resource = llvmpipe_can_create_resource;
    screen->resource_create_unbacked = llvmpipe_resource_create_unbacked;
 
-   screen->allocate_memory = llvmpipe_allocate_memory;
-   screen->free_memory = llvmpipe_free_memory;
    screen->map_memory = llvmpipe_map_memory;
    screen->unmap_memory = llvmpipe_unmap_memory;
 
