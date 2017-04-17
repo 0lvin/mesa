@@ -19,7 +19,7 @@ VkResult val_CreateShaderModule(
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
    assert(pCreateInfo->flags == 0);
 
-   module = val_alloc2(&device->alloc, pAllocator,
+   module = vk_alloc2(&device->alloc, pAllocator,
                        sizeof(*module) + pCreateInfo->codeSize, 8,
                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (module == NULL)
@@ -42,7 +42,7 @@ void val_DestroyShaderModule(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_shader_module, module, _module);
 
-   val_free2(&device->alloc, pAllocator, module);
+   vk_free2(&device->alloc, pAllocator, module);
 }
 
 void val_DestroyPipeline(
@@ -64,7 +64,7 @@ void val_DestroyPipeline(
 
    if (pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY])
       tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY]);
-   val_free2(&device->alloc, pAllocator, pipeline);
+   vk_free2(&device->alloc, pAllocator, pipeline);
 }
 
 static VkResult
@@ -102,13 +102,13 @@ deep_copy_vertex_input_state(struct VkPipelineVertexInputStateCreateInfo *dst,
       memcpy(&dst_binding_descriptions[i], &src->pVertexBindingDescriptions[i], sizeof(VkVertexInputBindingDescription));
    }
    dst->pVertexBindingDescriptions = dst_binding_descriptions;
-   
+
    dst->vertexAttributeDescriptionCount = src->vertexAttributeDescriptionCount;
-   
+
    dst_attrib_descriptions = malloc(src->vertexAttributeDescriptionCount * sizeof(VkVertexInputAttributeDescription));
    if (!dst_attrib_descriptions)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
-   
+
    for (i = 0; i < dst->vertexAttributeDescriptionCount; i++) {
       memcpy(&dst_attrib_descriptions[i], &src->pVertexAttributeDescriptions[i], sizeof(VkVertexInputAttributeDescription));
    }
@@ -162,9 +162,9 @@ deep_copy_color_blend_state(VkPipelineColorBlendStateCreateInfo *dst,
    memcpy(attachments, src->pAttachments, src->attachmentCount * sizeof(VkPipelineColorBlendAttachmentState));
    dst->attachmentCount = src->attachmentCount;
    dst->pAttachments = attachments;
-   
+
    memcpy(&dst->blendConstants, &src->blendConstants, sizeof(float) * 4);
-          
+
    return VK_SUCCESS;
 }
 
@@ -235,7 +235,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
    /* pTessellationState - TODO */
    if (src->pTessellationState)
       val_finishme("tess state\n");
-   
+
    /* pViewportState */
    if (src->pViewportState) {
       VkPipelineViewportStateCreateInfo *viewport_state;
@@ -246,7 +246,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
       dst->pViewportState = viewport_state;
    } else
       dst->pViewportState = NULL;
-   
+
    /* pRasterizationState */
    raster_state = malloc(sizeof(VkPipelineRasterizationStateCreateInfo));
    if (!raster_state)
@@ -301,7 +301,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
       dst->pDynamicState = dyn_state;
    } else
       dst->pDynamicState = NULL;
-   
+
    return VK_SUCCESS;
 }
 
@@ -506,7 +506,7 @@ val_graphics_pipeline_create(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
 
-   pipeline = val_alloc2(&device->alloc, pAllocator, sizeof(*pipeline), 8,
+   pipeline = vk_alloc2(&device->alloc, pAllocator, sizeof(*pipeline), 8,
                          VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (pipeline == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -514,7 +514,7 @@ val_graphics_pipeline_create(
    result = val_graphics_pipeline_init(pipeline, device, cache, pCreateInfo,
 				       pAllocator);
    if (result != VK_SUCCESS) {
-      val_free2(&device->alloc, pAllocator, pipeline);
+      vk_free2(&device->alloc, pAllocator, pipeline);
       return result;
    }
 
@@ -535,7 +535,7 @@ VkResult val_CreateGraphicsPipelines(
 {
    VkResult result;;
    unsigned i = 0;
-   
+
    for (; i < count; i++) {
       result = val_graphics_pipeline_create(_device,
                                             pipelineCache,
@@ -595,7 +595,7 @@ val_compute_pipeline_create(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
 
-   pipeline = val_alloc2(&device->alloc, pAllocator, sizeof(*pipeline), 8,
+   pipeline = vk_alloc2(&device->alloc, pAllocator, sizeof(*pipeline), 8,
                          VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (pipeline == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -603,7 +603,7 @@ val_compute_pipeline_create(
    result = val_compute_pipeline_init(pipeline, device, cache, pCreateInfo,
 				      pAllocator);
    if (result != VK_SUCCESS) {
-      val_free2(&device->alloc, pAllocator, pipeline);
+      vk_free2(&device->alloc, pAllocator, pipeline);
       return result;
    }
 

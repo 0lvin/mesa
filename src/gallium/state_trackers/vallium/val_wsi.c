@@ -60,7 +60,7 @@ void val_DestroySurfaceKHR(
    VAL_FROM_HANDLE(val_instance, instance, _instance);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
 
-   val_free2(&instance->alloc, pAllocator, surface);
+   vk_free2(&instance->alloc, pAllocator, surface);
 }
 
 VkResult val_GetPhysicalDeviceSurfaceSupportKHR(

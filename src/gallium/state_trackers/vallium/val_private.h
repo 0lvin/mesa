@@ -154,51 +154,6 @@ align_u64(uint64_t v, uint64_t a)
 	return (v + a - 1) & ~(a - 1);
 }
 
-static inline void *
-val_alloc(const VkAllocationCallbacks *alloc,
-          size_t size, size_t align,
-          VkSystemAllocationScope scope)
-{
-   return alloc->pfnAllocation(alloc->pUserData, size, align, scope);
-}
-
-static inline void *
-val_realloc(const VkAllocationCallbacks *alloc,
-            void *ptr, size_t size, size_t align,
-            VkSystemAllocationScope scope)
-{
-   return alloc->pfnReallocation(alloc->pUserData, ptr, size, align, scope);
-}
-
-static inline void
-val_free(const VkAllocationCallbacks *alloc, void *data)
-{
-   alloc->pfnFree(alloc->pUserData, data);
-}
-
-static inline void *
-val_alloc2(const VkAllocationCallbacks *parent_alloc,
-           const VkAllocationCallbacks *alloc,
-           size_t size, size_t align,
-           VkSystemAllocationScope scope)
-{
-   if (alloc)
-      return val_alloc(alloc, size, align, scope);
-   else
-      return val_alloc(parent_alloc, size, align, scope);
-}
-
-static inline void
-val_free2(const VkAllocationCallbacks *parent_alloc,
-          const VkAllocationCallbacks *alloc,
-          void *data)
-{
-   if (alloc)
-      val_free(alloc, data);
-   else
-      val_free(parent_alloc, data);
-}
-
 struct val_shader_module {
    uint32_t                                     size;
    char                                         data[0];

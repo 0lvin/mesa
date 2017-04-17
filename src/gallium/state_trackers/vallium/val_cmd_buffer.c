@@ -9,7 +9,7 @@ static VkResult val_create_cmd_buffer(
    struct val_cmd_buffer *cmd_buffer;
    VkResult result;
 
-   cmd_buffer = val_alloc(&pool->alloc, sizeof(*cmd_buffer), 8,
+   cmd_buffer = vk_alloc(&pool->alloc, sizeof(*cmd_buffer), 8,
                           VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (cmd_buffer == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -42,7 +42,7 @@ VkResult val_AllocateCommandBuffers(
 
    VkResult result = VK_SUCCESS;
    uint32_t i;
-   
+
    for (i = 0; i < pAllocateInfo->commandBufferCount; i++) {
       result = val_create_cmd_buffer(device, pool, pAllocateInfo->level,
                                      &pCommandBuffers[i]);
@@ -63,7 +63,7 @@ val_cmd_buffer_destroy(struct val_cmd_buffer *cmd_buffer)
    if (cmd_buffer->ctx)
       cmd_buffer->ctx->destroy(cmd_buffer->ctx);
    list_del(&cmd_buffer->pool_link);
-   val_free(&cmd_buffer->pool->alloc, cmd_buffer);
+   vk_free(&cmd_buffer->pool->alloc, cmd_buffer);
 }
 
 void val_FreeCommandBuffers(
@@ -110,7 +110,7 @@ VkResult val_CreateCommandPool(
    VAL_FROM_HANDLE(val_device, device, _device);
    struct val_cmd_pool *pool;
 
-   pool = val_alloc2(&device->alloc, pAllocator, sizeof(*pool), 8,
+   pool = vk_alloc2(&device->alloc, pAllocator, sizeof(*pool), 8,
                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (pool == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -137,7 +137,7 @@ void val_DestroyCommandPool(
 
    val_ResetCommandPool(_device, commandPool, 0);
 
-   val_free2(&device->alloc, pAllocator, pool);
+   vk_free2(&device->alloc, pAllocator, pool);
 }
 
 VkResult val_ResetCommandPool(
@@ -158,7 +158,7 @@ void val_CmdBeginRenderPass(
    VAL_FROM_HANDLE(val_framebuffer, framebuffer, pRenderPassBegin->framebuffer);
    struct val_cmd_buffer_entry *cmd;
 
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -189,7 +189,7 @@ void val_CmdBindVertexBuffers(
    struct val_buffer **buffers;
    VkDeviceSize *offsets;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -220,13 +220,13 @@ void val_CmdBindPipeline(
    VAL_FROM_HANDLE(val_pipeline, pipeline, _pipeline);
    struct val_cmd_buffer_entry *cmd;
 
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
       return;
    cmd->cmd_type = VAL_CMD_BIND_PIPELINE;
-   
+
    cmd->u.pipeline.bind_point = pipelineBindPoint;
    cmd->u.pipeline.pipeline = pipeline;
 
@@ -249,7 +249,7 @@ void val_CmdBindDescriptorSets(
    struct val_descriptor_set **sets;
    uint32_t *offsets;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                    sizeof(*cmd),
                    8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -273,7 +273,7 @@ void val_CmdBindDescriptorSets(
       offsets[i] = pDynamicOffsets[i];
    cmd->u.descriptor_sets.dynamic_offsets = offsets;
 
-   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);   
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 
 void val_CmdDraw(
@@ -286,7 +286,7 @@ void val_CmdDraw(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
 
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                    sizeof(*cmd),
                    8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -297,7 +297,7 @@ void val_CmdDraw(
    cmd->u.draw.instance_count = instanceCount;
    cmd->u.draw.first_vertex = firstVertex;
    cmd->u.draw.first_instance = firstInstance;
-   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);   
+   list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 }
 
 
@@ -307,7 +307,7 @@ void val_CmdEndRenderPass(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
 
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -328,7 +328,7 @@ void val_CmdSetViewport(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -425,7 +425,7 @@ void val_CmdBindIndexBuffer(
    VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
    struct val_cmd_buffer_entry *cmd;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -449,7 +449,7 @@ void val_CmdDrawIndexed(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -474,7 +474,7 @@ void val_CmdDispatch(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -496,7 +496,7 @@ void val_CmdDispatchIndirect(
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)

@@ -18,7 +18,7 @@ VkResult val_CreateRenderPass(
    attachments_offset = size;
    size += pCreateInfo->attachmentCount * sizeof(pass->attachments[0]);
 
-   pass = val_alloc2(&device->alloc, pAllocator, size, 8,
+   pass = vk_alloc2(&device->alloc, pAllocator, size, 8,
                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (pass == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -55,11 +55,11 @@ VkResult val_CreateRenderPass(
    }
 
    pass->subpass_attachments =
-      val_alloc2(&device->alloc, pAllocator,
+      vk_alloc2(&device->alloc, pAllocator,
                  subpass_attachment_count * sizeof(uint32_t), 8,
                  VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (pass->subpass_attachments == NULL) {
-      val_free2(&device->alloc, pAllocator, pass);
+      vk_free2(&device->alloc, pAllocator, pass);
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    }
 
@@ -125,8 +125,8 @@ void val_DestroyRenderPass(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_render_pass, pass, _pass);
 
-   val_free2(&device->alloc, pAllocator, pass->subpass_attachments);
-   val_free2(&device->alloc, pAllocator, pass);
+   vk_free2(&device->alloc, pAllocator, pass->subpass_attachments);
+   vk_free2(&device->alloc, pAllocator, pass);
 }
 
 void val_GetRenderAreaGranularity(

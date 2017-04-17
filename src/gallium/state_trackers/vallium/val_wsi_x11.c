@@ -54,7 +54,7 @@ wsi_x11_connection_create(struct val_instance *instance, xcb_connection_t *conn)
    xcb_query_extension_reply_t *dri3_reply, *pres_reply;
 
    struct wsi_x11_connection *wsi_conn =
-      val_alloc(&instance->alloc, sizeof(*wsi_conn), 8,
+      vk_alloc(&instance->alloc, sizeof(*wsi_conn), 8,
                 VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!wsi_conn)
       return NULL;
@@ -67,7 +67,7 @@ wsi_x11_connection_create(struct val_instance *instance, xcb_connection_t *conn)
    if (dri3_reply == NULL || pres_reply == NULL) {
       free(dri3_reply);
       free(pres_reply);
-      val_free(&instance->alloc, wsi_conn);
+      vk_free(&instance->alloc, wsi_conn);
       return NULL;
    }
 
@@ -84,7 +84,7 @@ static void
 wsi_x11_connection_destroy(struct val_instance *instance,
                            struct wsi_x11_connection *conn)
 {
-   val_free(&instance->alloc, conn);
+   vk_free(&instance->alloc, conn);
 }
 
 static struct wsi_x11_connection *
@@ -537,7 +537,7 @@ x11_swapchain_destroy(struct val_swapchain *val_chain,
       /* TODO: Delete images and free memory */
    }
 
-   val_free2(&chain->base.device->alloc, pAllocator, chain);
+   vk_free2(&chain->base.device->alloc, pAllocator, chain);
 
    return VK_SUCCESS;
 }
@@ -559,7 +559,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
 
    size_t size = sizeof(*chain) + num_images * sizeof(chain->images[0]);
-   chain = val_alloc2(&device->alloc, pAllocator, size, 8,
+   chain = vk_alloc2(&device->alloc, pAllocator, size, 8,
                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (chain == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -679,7 +679,7 @@ val_x11_init_wsi(struct val_instance *instance)
    struct wsi_x11 *wsi;
    VkResult result;
 
-   wsi = val_alloc(&instance->alloc, sizeof(*wsi), 8,
+   wsi = vk_alloc(&instance->alloc, sizeof(*wsi), 8,
                    VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!wsi) {
       result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -718,7 +718,7 @@ val_x11_init_wsi(struct val_instance *instance)
 fail_mutex:
    pthread_mutex_destroy(&wsi->mutex);
 fail_alloc:
-   val_free(&instance->alloc, wsi);
+   vk_free(&instance->alloc, wsi);
 fail:
    instance->wsi[VK_ICD_WSI_PLATFORM_XCB] = NULL;
 
@@ -736,6 +736,6 @@ val_x11_finish_wsi(struct val_instance *instance)
 
       pthread_mutex_destroy(&wsi->mutex);
 
-      val_free(&instance->alloc, wsi);
+      vk_free(&instance->alloc, wsi);
    }
 }

@@ -11,7 +11,7 @@ VkResult val_CreateSampler(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
 
-   sampler = val_alloc2(&device->alloc, pAllocator, sizeof(*sampler), 8,
+   sampler = vk_alloc2(&device->alloc, pAllocator, sizeof(*sampler), 8,
                         VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!sampler)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -30,5 +30,5 @@ void val_DestroySampler(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_sampler, sampler, _sampler);
 
-   val_free2(&device->alloc, pAllocator, sampler);
+   vk_free2(&device->alloc, pAllocator, sampler);
 }

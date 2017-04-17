@@ -22,7 +22,7 @@ VkResult val_CreateDescriptorSetLayout(
                  (max_binding + 1) * sizeof(set_layout->binding[0]) +
                  immutable_sampler_count * sizeof(struct val_sampler *);
 
-   set_layout = val_alloc2(&device->alloc, pAllocator, size, 8,
+   set_layout = vk_alloc2(&device->alloc, pAllocator, size, 8,
                            VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!set_layout)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -148,7 +148,7 @@ void val_DestroyDescriptorSetLayout(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_descriptor_set_layout, set_layout, _set_layout);
 
-   val_free2(&device->alloc, pAllocator, set_layout);
+   vk_free2(&device->alloc, pAllocator, set_layout);
 }
 
 VkResult val_CreatePipelineLayout(
@@ -162,14 +162,14 @@ VkResult val_CreatePipelineLayout(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
 
-   layout = val_alloc2(&device->alloc, pAllocator, sizeof(*layout), 8,
+   layout = vk_alloc2(&device->alloc, pAllocator, sizeof(*layout), 8,
                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (layout == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    *pPipelineLayout = val_pipeline_layout_to_handle(layout);
 
    return VK_SUCCESS;
-  
+
 }
 
 void val_DestroyPipelineLayout(
@@ -180,7 +180,7 @@ void val_DestroyPipelineLayout(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_pipeline_layout, pipeline_layout, _pipelineLayout);
 
-   val_free2(&device->alloc, pAllocator, pipeline_layout);
+   vk_free2(&device->alloc, pAllocator, pipeline_layout);
 }
 
 VkResult
@@ -191,7 +191,7 @@ val_descriptor_set_create(struct val_device *device,
    struct val_descriptor_set *set;
    size_t size = sizeof(*set) + layout->size * sizeof(set->descriptors[0]);
 
-   set = val_alloc(&device->alloc /* XXX: Use the pool */, size, 8,
+   set = vk_alloc(&device->alloc /* XXX: Use the pool */, size, 8,
                    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!set)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -215,11 +215,11 @@ val_descriptor_set_create(struct val_device *device,
 
    /* XXX: Use the pool */
    set->buffer_views =
-      val_alloc(&device->alloc,
+      vk_alloc(&device->alloc,
                 sizeof(set->buffer_views[0]) * layout->buffer_count, 8,
                 VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!set->buffer_views) {
-      val_free(&device->alloc, set);
+      vk_free(&device->alloc, set);
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    }
 
@@ -242,8 +242,8 @@ val_descriptor_set_destroy(struct val_device *device,
 //      val_state_pool_free(&device->surface_state_pool,
 //                          set->buffer_views[b].surface_state);
 
-   val_free(&device->alloc, set->buffer_views);
-   val_free(&device->alloc, set);
+   vk_free(&device->alloc, set->buffer_views);
+   vk_free(&device->alloc, set);
 }
 
 

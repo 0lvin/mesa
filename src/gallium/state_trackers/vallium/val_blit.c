@@ -24,7 +24,7 @@ void val_CmdCopyImageToBuffer(
    struct val_cmd_buffer_entry *cmd;
 
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)
@@ -62,7 +62,7 @@ void val_CmdCopyImage(
    struct val_cmd_buffer_entry *cmd;
 
    int i;
-   cmd = val_alloc(&cmd_buffer->pool->alloc,
+   cmd = vk_alloc(&cmd_buffer->pool->alloc,
 		   sizeof(*cmd),
 		   8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!cmd)

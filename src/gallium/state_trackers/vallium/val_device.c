@@ -24,19 +24,27 @@ val_physical_device_init(struct val_physical_device *device,
 }
 
 static const VkExtensionProperties global_extensions[] = {
-   {
-      .extensionName = VK_KHR_SURFACE_EXTENSION_NAME,
-      .specVersion = 25,
-   },
-   {
-      .extensionName = VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-      .specVersion = 5,
-   },
-#ifdef HAVE_WAYLAND_PLATFORM
-   {
-      .extensionName = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-      .specVersion = 4,
-   },
+	{
+		.extensionName = VK_KHR_SURFACE_EXTENSION_NAME,
+		.specVersion = 25,
+	},
+#ifdef VK_USE_PLATFORM_XCB_KHR
+	{
+		.extensionName = VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+		.specVersion = 6,
+	},
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+	{
+		.extensionName = VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+		.specVersion = 6,
+	},
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+	{
+		.extensionName = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+		.specVersion = 5,
+	},
 #endif
 };
 
@@ -112,7 +120,7 @@ VkResult val_CreateInstance(
          return vk_error(VK_ERROR_EXTENSION_NOT_PRESENT);
    }
 
-   instance = val_alloc2(&default_alloc, pAllocator, sizeof(*instance), 8,
+   instance = vk_alloc2(&default_alloc, pAllocator, sizeof(*instance), 8,
                          VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!instance)
      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -150,7 +158,7 @@ void val_DestroyInstance(
 
    val_finish_wsi(instance);
    //   _mesa_locale_fini();
-   val_free(&instance->alloc, instance);
+   vk_free(&instance->alloc, instance);
 }
 
 static void val_get_image(struct dri_drawable *dri_drawable,
@@ -526,7 +534,7 @@ VkResult val_CreateDevice(
          return vk_error(VK_ERROR_EXTENSION_NOT_PRESENT);
    }
 
-   device = val_alloc2(&physical_device->instance->alloc, pAllocator,
+   device = vk_alloc2(&physical_device->instance->alloc, pAllocator,
                        sizeof(*device), 8,
                        VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
    if (!device)
@@ -556,7 +564,7 @@ void val_DestroyDevice(
 {
    VAL_FROM_HANDLE(val_device, device, _device);
 
-   val_free(&device->alloc, device);
+   vk_free(&device->alloc, device);
 }
 
 VkResult val_EnumerateInstanceExtensionProperties(
@@ -685,7 +693,7 @@ VkResult val_AllocateMemory(
 		return VK_SUCCESS;
 	}
 
-	mem = val_alloc2(&device->alloc, pAllocator, sizeof(*mem), 8,
+	mem = vk_alloc2(&device->alloc, pAllocator, sizeof(*mem), 8,
 			    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 	if (mem == NULL)
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -694,7 +702,7 @@ VkResult val_AllocateMemory(
 	mem->pmem = vk_alloc2(&device->alloc, pAllocator, alloc_size, 8,
 			  VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 	if (!mem->pmem) {
-		val_free2(&device->alloc, pAllocator, mem);
+		vk_free2(&device->alloc, pAllocator, mem);
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 	}
 
@@ -721,8 +729,8 @@ void val_FreeMemory(
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
 
-	val_free2(&device->alloc, pAllocator, mem->pmem);
-	val_free2(&device->alloc, pAllocator, mem);
+	vk_free2(&device->alloc, pAllocator, mem->pmem);
+	vk_free2(&device->alloc, pAllocator, mem);
 }
 
 VkResult val_MapMemory(
@@ -889,7 +897,7 @@ VkResult val_CreateFence(
    VAL_FROM_HANDLE(val_device, device, _device);
    struct val_fence *fence;
 
-   fence = val_alloc2(&device->alloc, pAllocator, sizeof(*fence), 8,
+   fence = vk_alloc2(&device->alloc, pAllocator, sizeof(*fence), 8,
                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (fence == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -905,7 +913,7 @@ void val_DestroyFence(
     const VkAllocationCallbacks*                pAllocator)
 {
    VAL_FROM_HANDLE(val_device, device, _device);
-   val_free2(&device->alloc, pAllocator, val_fence_from_handle(_fence));
+   vk_free2(&device->alloc, pAllocator, val_fence_from_handle(_fence));
 }
 
 VkResult val_ResetFences(
@@ -937,7 +945,7 @@ VkResult val_CreateBuffer(
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
 
-   buffer = val_alloc2(&device->alloc, pAllocator, sizeof(*buffer), 8,
+   buffer = vk_alloc2(&device->alloc, pAllocator, sizeof(*buffer), 8,
                        VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (buffer == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -972,7 +980,7 @@ void val_DestroyBuffer(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
-   val_free2(&device->alloc, pAllocator, buffer);
+   vk_free2(&device->alloc, pAllocator, buffer);
 }
 
 VkResult val_CreateFramebuffer(
@@ -988,7 +996,7 @@ VkResult val_CreateFramebuffer(
 
    size_t size = sizeof(*framebuffer) +
                  sizeof(struct val_image_view *) * pCreateInfo->attachmentCount;
-   framebuffer = val_alloc2(&device->alloc, pAllocator, size, 8,
+   framebuffer = vk_alloc2(&device->alloc, pAllocator, size, 8,
                             VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (framebuffer == NULL)
       return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -1016,7 +1024,7 @@ void val_DestroyFramebuffer(
    VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_framebuffer, fb, _fb);
 
-   val_free2(&device->alloc, pAllocator, fb);
+   vk_free2(&device->alloc, pAllocator, fb);
 }
 
 
