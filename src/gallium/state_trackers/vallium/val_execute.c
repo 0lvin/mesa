@@ -91,7 +91,7 @@ static VkResult emit_state(struct rendering_state *state)
 
    if (state->rs_dirty) {
       if (state->rast_handle)
-         state->pctx->delete_rasterizer_state(state->pctx, state->rast_handle); 
+         state->pctx->delete_rasterizer_state(state->pctx, state->rast_handle);
       state->rast_handle = state->pctx->create_rasterizer_state(state->pctx,
                                                                 &state->rs_state);
       state->pctx->bind_rasterizer_state(state->pctx, state->rast_handle);
@@ -149,14 +149,14 @@ static VkResult emit_state(struct rendering_state *state)
    }
 
    for (sh = 0; sh < PIPE_SHADER_TYPES; sh++) {
-      void *ss[16] = { 0 };
+      //void *ss[16] = { 0 };
       int i;
       if (!state->ss_dirty[sh])
          continue;
 
       for (i = 0; i < state->num_sampler_states[sh]; i++) {
-         if (state->ss_cso[sh][i])
-            ss[i] = state->ss_cso[sh][i];
+         //if (state->ss_cso[sh][i])
+         //   ss[i] = state->ss_cso[sh][i];
 
          state->ss_cso[sh][i] = state->pctx->create_sampler_state(state->pctx, &state->ss[sh][i]);
       }
@@ -180,7 +180,7 @@ static VkResult handle_compute_pipeline(struct val_cmd_buffer_entry *cmd,
 					 struct rendering_state *state)
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
-   const VkPipelineShaderStageCreateInfo *sh = &pipeline->compute_create_info.stage;
+//   const VkPipelineShaderStageCreateInfo *sh = &pipeline->compute_create_info.stage;
    struct pipe_compute_state shstate;
    memset(&shstate, 0, sizeof(shstate));
 
@@ -196,7 +196,9 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
 					 struct rendering_state *state)
 {
    struct val_pipeline *pipeline = cmd->u.pipeline.pipeline;
-   bool dynamic_state_viewport = false, dynamic_state_scissor = false;
+   bool dynamic_state_viewport = false;
+#if 0
+   bool dynamic_state_scissor = false;
 
    if (pipeline->graphics_create_info.pDynamicState)
    {
@@ -209,6 +211,7 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
             dynamic_state_scissor = true;
       }
    }
+#endif
 
    {
       int i;
@@ -259,7 +262,7 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
       state->dsa_state.depth.bounds_test = dsa->depthBoundsTestEnable;
       state->dsa_state.depth.bounds_min = dsa->minDepthBounds;
       state->dsa_state.depth.bounds_max = dsa->maxDepthBounds;
-      
+
       state->dsa_state.stencil[0].enabled = dsa->stencilTestEnable;
       state->dsa_state.stencil[0].func = dsa->front.compareOp;
       state->dsa_state.stencil[0].fail_op = vk_conv_stencil_op(dsa->front.failOp);
@@ -267,7 +270,7 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
       state->dsa_state.stencil[0].zfail_op = vk_conv_stencil_op(dsa->front.depthFailOp);
       state->dsa_state.stencil[0].valuemask = dsa->front.compareMask;
       state->dsa_state.stencil[0].writemask = dsa->front.writeMask;
-      
+
       state->dsa_state.stencil[1].enabled = dsa->stencilTestEnable;
       state->dsa_state.stencil[1].func = dsa->back.compareOp;
       state->dsa_state.stencil[1].fail_op = vk_conv_stencil_op(dsa->back.failOp);
@@ -414,7 +417,7 @@ static void handle_descriptor(struct rendering_state *state,
       u_sampler_view_default_template(&templ,
 				      iv->image->bo,
 				      vk_format_to_pipe(iv->format));
-      
+
       state->sv[sidx][idx] = state->pctx->create_sampler_view(state->pctx, iv->image->bo, &templ);
       state->ss_dirty[sidx] = true;
       state->num_sampler_views[sidx]++;
@@ -473,7 +476,7 @@ static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 
    if (bds->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
       return handle_compute_descriptor_sets(cmd, state);
-   
+
    state->num_const_bufs[PIPE_SHADER_VERTEX] = 0;
    state->num_sampler_views[PIPE_SHADER_VERTEX] = 0;
    state->num_sampler_views[PIPE_SHADER_FRAGMENT] = 0;
@@ -516,7 +519,7 @@ static VkResult handle_begin_render_pass(struct val_cmd_buffer_entry *cmd,
          template.height = cmd->u.begin_render_pass.framebuffer->height;
 
          if (template.format == PIPE_FORMAT_NONE)
-            return;
+             return VK_SUCCESS;
          imgv->surface = state->pctx->create_surface(state->pctx,
                                                      imgv->image->bo, &template);
       }
@@ -623,7 +626,7 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
       box.width = copycmd->regions[i].imageExtent.width;
       box.height = copycmd->regions[i].imageExtent.height;
       box.depth = copycmd->regions[i].imageExtent.depth;
-      
+
       src_data = state->pctx->transfer_map(state->pctx,
                                            copycmd->src->bo,
                                            copycmd->regions[i].imageSubresource.mipLevel,
@@ -652,7 +655,7 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
                      src_data, util_format_get_stride(copycmd->src->bo->format, copycmd->src->bo->width0),
                      copycmd->regions[i].imageOffset.x,
                      copycmd->regions[i].imageOffset.y);
-                     
+
       state->pctx->transfer_unmap(state->pctx, src_t);
       state->pctx->transfer_unmap(state->pctx, dst_t);
    }

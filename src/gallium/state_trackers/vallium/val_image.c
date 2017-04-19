@@ -138,7 +138,6 @@ val_CreateBufferView(VkDevice _device,
                      VkBufferView *pView)
 {
    VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_buffer, buffer, pCreateInfo->buffer);
    struct val_buffer_view *view;
    view = vk_alloc2(&device->alloc, pAllocator, sizeof(*view), 8,
                      VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);

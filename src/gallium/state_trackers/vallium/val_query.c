@@ -6,8 +6,8 @@ VkResult val_CreateQueryPool(
     const VkAllocationCallbacks*                pAllocator,
     VkQueryPool*                                pQueryPool)
 {
-
-
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 void val_DestroyQueryPool(
@@ -15,8 +15,5 @@ void val_DestroyQueryPool(
     VkQueryPool                                 _pool,
     const VkAllocationCallbacks*                pAllocator)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-//   VAL_FROM_HANDLE(val_query_pool, pool, _pool);
-
-
+	val_finishme("Implement %s", __func__);
 }

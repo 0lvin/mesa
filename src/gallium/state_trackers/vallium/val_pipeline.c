@@ -6,7 +6,9 @@
 
 #include "tgsi/tgsi_parse.h"
 #include "tgsi/tgsi_dump.h"
+
 #define SPIR_V_MAGIC_NUMBER 0x07230203
+
 VkResult val_CreateShaderModule(
     VkDevice                                    _device,
     const VkShaderModuleCreateInfo*             pCreateInfo,
@@ -64,6 +66,7 @@ void val_DestroyPipeline(
 
    if (pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY])
       tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY]);
+
    vk_free2(&device->alloc, pAllocator, pipeline);
 }
 
@@ -345,7 +348,7 @@ st_shader_stage_to_ptarget(gl_shader_stage stage)
    return PIPE_SHADER_VERTEX;
 }
 
-static void *
+static const void *
 val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
                            struct val_shader_module *module,
                            const char *entrypoint_name,
@@ -355,7 +358,7 @@ val_shader_compile_to_tgsi(struct val_pipeline *pipeline,
    if (strcmp(entrypoint_name, "main") != 0) {
       val_finishme("Multiple shaders per module not really supported");
    }
-   void *tgsi;
+   const void *tgsi;
    nir_shader *nir;
    nir_function *entry_point;
    nir_shader_compiler_options options = {};
@@ -439,7 +442,7 @@ val_pipeline_compile(struct val_pipeline *pipeline,
                      gl_shader_stage stage,
                      const VkSpecializationInfo *spec_info)
 {
-   pipeline->pipeline_tgsi[stage] = val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
+   pipeline->pipeline_tgsi[stage] = (void *)val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
    return VK_SUCCESS;
 }
 
@@ -450,7 +453,6 @@ val_graphics_pipeline_init(struct val_pipeline *pipeline,
 			   const VkGraphicsPipelineCreateInfo *pCreateInfo,
 			   const VkAllocationCallbacks *alloc)
 {
-   VkResult result;
    if (alloc == NULL)
       alloc = &device->alloc;
    pipeline->device = device;
@@ -502,7 +504,6 @@ val_graphics_pipeline_create(
    VAL_FROM_HANDLE(val_pipeline_cache, cache, _cache);
    struct val_pipeline *pipeline;
    VkResult result;
-   uint32_t offset, length;
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
 
@@ -561,7 +562,6 @@ val_compute_pipeline_init(struct val_pipeline *pipeline,
 			  const VkComputePipelineCreateInfo *pCreateInfo,
 			  const VkAllocationCallbacks *alloc)
 {
-   VkResult result;
    VAL_FROM_HANDLE(val_shader_module, module,
 		   pCreateInfo->stage.module);
    if (alloc == NULL)
@@ -591,7 +591,6 @@ val_compute_pipeline_create(
    VAL_FROM_HANDLE(val_pipeline_cache, cache, _cache);
    struct val_pipeline *pipeline;
    VkResult result;
-   uint32_t offset, length;
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
 
@@ -622,7 +621,7 @@ VkResult val_CreateComputePipelines(
     const VkAllocationCallbacks*                pAllocator,
     VkPipeline*                                 pPipelines)
 {
-   VkResult result;;
+   VkResult result;
    unsigned i = 0;
 
    for (; i < count; i++) {
@@ -654,6 +653,5 @@ void val_CmdPipelineBarrier(
     uint32_t                                    imageMemoryBarrierCount,
     const VkImageMemoryBarrier*                 pImageMemoryBarriers)
 {
-   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-
+	val_finishme("Implement %s", __func__);
 }

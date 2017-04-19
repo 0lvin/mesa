@@ -298,7 +298,7 @@ void val_UpdateDescriptorSets(
     uint32_t                                    descriptorCopyCount,
     const VkCopyDescriptorSet*                  pDescriptorCopies)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
+   // VAL_FROM_HANDLE(val_device, device, _device);
    for (uint32_t i = 0; i < descriptorWriteCount; i++) {
       const VkWriteDescriptorSet *write = &pDescriptorWrites[i];
       VAL_FROM_HANDLE(val_descriptor_set, set, write->dstSet);

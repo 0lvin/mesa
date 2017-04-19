@@ -8,8 +8,9 @@ void val_CmdCopyBufferToImage(
     uint32_t                                    regionCount,
     const VkBufferImageCopy*                    pRegions)
 {
-
+	val_finishme("Implement %s", __func__);
 }
+
 void val_CmdCopyImageToBuffer(
     VkCommandBuffer                             commandBuffer,
     VkImage                                     srcImage,
@@ -23,7 +24,6 @@ void val_CmdCopyImageToBuffer(
    VAL_FROM_HANDLE(val_buffer, dst_buffer, destBuffer);
    struct val_cmd_buffer_entry *cmd;
 
-   int i;
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -61,7 +61,6 @@ void val_CmdCopyImage(
    VAL_FROM_HANDLE(val_image, dest_image, destImage);
    struct val_cmd_buffer_entry *cmd;
 
-   int i;
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
 		   sizeof(*cmd),
 		   8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -94,5 +93,5 @@ void val_CmdCopyBuffer(
     uint32_t                                    regionCount,
     const VkBufferCopy*                         pRegions)
 {
-
+	val_finishme("Implement %s", __func__);
 }

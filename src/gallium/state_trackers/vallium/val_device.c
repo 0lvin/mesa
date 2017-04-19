@@ -449,8 +449,6 @@ void val_GetPhysicalDeviceMemoryProperties(
 					   VkPhysicalDevice                            physicalDevice,
 					   VkPhysicalDeviceMemoryProperties*           pMemoryProperties)
 {
-   VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
-
    pMemoryProperties->memoryTypeCount = 1;
    pMemoryProperties->memoryTypes[0] = (VkMemoryType) {
       .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
@@ -503,11 +501,6 @@ val_queue_init(struct val_device *device, struct val_queue *queue)
 	queue->device = device;
 
 	return VK_SUCCESS;
-}
-
-static void
-val_queue_finish(struct val_queue *queue)
-{
 }
 
 VkResult val_CreateDevice(
@@ -668,14 +661,18 @@ VkResult val_QueueSubmit(
 VkResult val_QueueWaitIdle(
 			   VkQueue                                     _queue)
 {
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
+
 
 VkResult val_DeviceWaitIdle(
 			    VkDevice                                    _device)
 {
-
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
+
 
 VkResult val_AllocateMemory(
 			    VkDevice                                    _device,
@@ -921,14 +918,16 @@ VkResult val_ResetFences(
     uint32_t                                    fenceCount,
     const VkFence*                              pFences)
 {
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 VkResult val_GetFenceStatus(
     VkDevice                                    _device,
     VkFence                                     _fence)
 {
-
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 
@@ -1035,9 +1034,8 @@ VkResult val_WaitForFences(
     VkBool32                                    waitAll,
     uint64_t                                    timeout)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 VkResult val_CreateSemaphore(
@@ -1052,7 +1050,8 @@ VkResult val_CreateSemaphore(
 
    *pSemaphore = (VkSemaphore)1;
 
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 void val_DestroySemaphore(
@@ -1060,7 +1059,9 @@ void val_DestroySemaphore(
     VkSemaphore                                 semaphore,
     const VkAllocationCallbacks*                pAllocator)
 {
+	val_finishme("Implement %s", __func__);
 }
+
 
 VkResult val_CreateEvent(
     VkDevice                                    _device,
@@ -1068,10 +1069,8 @@ VkResult val_CreateEvent(
     const VkAllocationCallbacks*                pAllocator,
     VkEvent*                                    pEvent)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   struct val_event *event;
-
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 
@@ -1080,5 +1079,6 @@ void val_DestroyEvent(
     VkEvent                                     _event,
     const VkAllocationCallbacks*                pAllocator)
 {
-
+	val_finishme("Implement %s", __func__);
 }
+

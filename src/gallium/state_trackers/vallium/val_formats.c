@@ -76,7 +76,7 @@ void val_GetPhysicalDeviceFormatProperties(
       }
       pFormatProperties->linearTilingFeatures = features;
       pFormatProperties->optimalTilingFeatures = features;
-      return VK_SUCCESS;
+      return;
    }
    if (physical_device->pscreen->is_format_supported(physical_device->pscreen, pformat,
                                              PIPE_BUFFER, 0, PIPE_BIND_VERTEX_BUFFER)) {
@@ -105,7 +105,6 @@ void val_GetPhysicalDeviceFormatProperties(
    pFormatProperties->linearTilingFeatures = features;
    pFormatProperties->optimalTilingFeatures = features;
    pFormatProperties->bufferFeatures = buffer_features;
-   return VK_SUCCESS;
 }
 
 VkResult val_GetPhysicalDeviceImageFormatProperties(
@@ -117,9 +116,8 @@ VkResult val_GetPhysicalDeviceImageFormatProperties(
     VkImageCreateFlags                          createFlags,
     VkImageFormatProperties*                    pImageFormatProperties)
 {
-     VAL_FROM_HANDLE(val_physical_device, physical_device, physicalDevice);
-
-     return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 void val_GetPhysicalDeviceSparseImageFormatProperties(
@@ -132,6 +130,7 @@ void val_GetPhysicalDeviceSparseImageFormatProperties(
     uint32_t*                                   pNumProperties,
     VkSparseImageFormatProperties*              pProperties)
 {
-   /* Sparse images are not yet supported. */
-   *pNumProperties = 0;
+	val_finishme("Implement %s", __func__);
+	/* Sparse images are not yet supported. */
+	*pNumProperties = 0;
 }

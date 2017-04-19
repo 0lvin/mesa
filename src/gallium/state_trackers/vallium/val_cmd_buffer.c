@@ -7,7 +7,6 @@ static VkResult val_create_cmd_buffer(
     VkCommandBuffer*                            pCommandBuffer)
 {
    struct val_cmd_buffer *cmd_buffer;
-   VkResult result;
 
    cmd_buffer = vk_alloc(&pool->alloc, sizeof(*cmd_buffer), 8,
                           VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -83,22 +82,23 @@ VkResult val_ResetCommandBuffer(
     VkCommandBuffer                             commandBuffer,
     VkCommandBufferResetFlags                   flags)
 {
-   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 VkResult val_BeginCommandBuffer(
     VkCommandBuffer                             commandBuffer,
     const VkCommandBufferBeginInfo*             pBeginInfo)
 {
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 VkResult val_EndCommandBuffer(
     VkCommandBuffer                             commandBuffer)
 {
-   return VK_SUCCESS;
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 VkResult val_CreateCommandPool(
@@ -145,7 +145,8 @@ VkResult val_ResetCommandPool(
     VkCommandPool                               commandPool,
     VkCommandPoolResetFlags                     flags)
 {
-
+	val_finishme("Implement %s", __func__);
+	return VK_SUCCESS;
 }
 
 void val_CmdBeginRenderPass(
@@ -349,16 +350,14 @@ void val_CmdSetScissor(
     uint32_t                                    scissorCount,
     const VkRect2D*                             pScissors)
 {
-   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdSetLineWidth(
     VkCommandBuffer                             commandBuffer,
     float                                       lineWidth)
 {
-   VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdSetDepthBias(
@@ -367,12 +366,14 @@ void val_CmdSetDepthBias(
     float                                       depthBiasClamp,
     float                                       depthBiasSlopeFactor)
 {
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdSetBlendConstants(
     VkCommandBuffer                             commandBuffer,
     const float                                 blendConstants[4])
 {
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdSetDepthBounds(
@@ -380,6 +381,7 @@ void val_CmdSetDepthBounds(
     float                                       minDepthBounds,
     float                                       maxDepthBounds)
 {
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdSetStencilCompareMask(
@@ -387,20 +389,23 @@ void val_CmdSetStencilCompareMask(
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    compareMask)
 {
+	val_finishme("Implement %s", __func__);
 }
+
 void val_CmdSetStencilWriteMask(
     VkCommandBuffer                             commandBuffer,
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    writeMask)
 {
+	val_finishme("Implement %s", __func__);
 }
-
 
 void val_CmdSetStencilReference(
     VkCommandBuffer                             commandBuffer,
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    reference)
 {
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdPushConstants(
@@ -411,8 +416,7 @@ void val_CmdPushConstants(
     uint32_t                                    size,
     const void*                                 pValues)
 {
-  VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-
+	val_finishme("Implement %s", __func__);
 }
 
 void val_CmdBindIndexBuffer(
@@ -422,9 +426,8 @@ void val_CmdBindIndexBuffer(
     VkIndexType                                 indexType)
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
-   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
    struct val_cmd_buffer_entry *cmd;
-   int i;
+
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -448,7 +451,7 @@ void val_CmdDrawIndexed(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
-   int i;
+
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -473,7 +476,7 @@ void val_CmdDispatch(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
-   int i;
+
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -495,7 +498,7 @@ void val_CmdDispatchIndirect(
 {
    VAL_FROM_HANDLE(val_cmd_buffer, cmd_buffer, commandBuffer);
    struct val_cmd_buffer_entry *cmd;
-   int i;
+
    cmd = vk_alloc(&cmd_buffer->pool->alloc,
                              sizeof(*cmd),
                              8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);

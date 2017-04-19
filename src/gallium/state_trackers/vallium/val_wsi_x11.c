@@ -580,7 +580,6 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
       VkDeviceMemory memory_h;
       VkImage image_h;
       struct val_image *image;
-      struct val_surface *surface;
       struct val_device_memory *memory;
 
       val_image_create(val_device_to_handle(device),
@@ -609,9 +608,12 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
          &image_h);
 
       image = val_image_from_handle(image_h);
-//      assert(val_format_is_color(image->format));
+/*
+        struct val_surface *surface;
+        assert(val_format_is_color(image->format));
 
-//      surface = &image->color_surface;
+        surface = &image->color_surface;
+*/
 
       val_AllocateMemory(val_device_to_handle(device),
          &(VkMemoryAllocateInfo) {
