@@ -405,7 +405,7 @@ struct val_pipeline {
    struct val_pipeline_layout *                 layout;
 
    bool is_compute_pipeline;
-   void *pipeline_tgsi[MESA_SHADER_STAGES];
+   const void *pipeline_tgsi[MESA_SHADER_STAGES];
    VkGraphicsPipelineCreateInfo graphics_create_info;
    VkComputePipelineCreateInfo compute_create_info;
 };

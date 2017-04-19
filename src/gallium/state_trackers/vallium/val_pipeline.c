@@ -52,22 +52,15 @@ void val_DestroyPipeline(
     VkPipeline                                  _pipeline,
     const VkAllocationCallbacks*                pAllocator)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_pipeline, pipeline, _pipeline);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_pipeline, pipeline, _pipeline);
 
-   if (pipeline->pipeline_tgsi[MESA_SHADER_VERTEX])
-      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_VERTEX]);
+	for (int i = 0; i < MESA_SHADER_STAGES; i++) {
+		if (pipeline->pipeline_tgsi[i])
+			tgsi_free_tokens(pipeline->pipeline_tgsi[i]);
+	}
 
-   if (pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT])
-      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_FRAGMENT]);
-
-   if (pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE])
-      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_COMPUTE]);
-
-   if (pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY])
-      tgsi_free_tokens(pipeline->pipeline_tgsi[MESA_SHADER_GEOMETRY]);
-
-   vk_free2(&device->alloc, pAllocator, pipeline);
+	vk_free2(&device->alloc, pAllocator, pipeline);
 }
 
 static VkResult
@@ -442,7 +435,7 @@ val_pipeline_compile(struct val_pipeline *pipeline,
                      gl_shader_stage stage,
                      const VkSpecializationInfo *spec_info)
 {
-   pipeline->pipeline_tgsi[stage] = (void *)val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
+   pipeline->pipeline_tgsi[stage] = val_shader_compile_to_tgsi(pipeline, module, entrypoint, stage, spec_info);
    return VK_SUCCESS;
 }
 
@@ -453,10 +446,13 @@ val_graphics_pipeline_init(struct val_pipeline *pipeline,
 			   const VkGraphicsPipelineCreateInfo *pCreateInfo,
 			   const VkAllocationCallbacks *alloc)
 {
-   if (alloc == NULL)
-      alloc = &device->alloc;
-   pipeline->device = device;
-   pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
+	if (alloc == NULL)
+		alloc = &device->alloc;
+	pipeline->device = device;
+	pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
+
+	for (int i = 0; i < MESA_SHADER_STAGES; i++)
+		pipeline->pipeline_tgsi[i] = NULL;
 
    /* recreate createinfo */
    deep_copy_graphics_create_info(&pipeline->graphics_create_info, pCreateInfo);
@@ -562,21 +558,24 @@ val_compute_pipeline_init(struct val_pipeline *pipeline,
 			  const VkComputePipelineCreateInfo *pCreateInfo,
 			  const VkAllocationCallbacks *alloc)
 {
-   VAL_FROM_HANDLE(val_shader_module, module,
-		   pCreateInfo->stage.module);
-   if (alloc == NULL)
-      alloc = &device->alloc;
-   pipeline->device = device;
-   pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
+	VAL_FROM_HANDLE(val_shader_module, module,
+	   pCreateInfo->stage.module);
+	if (alloc == NULL)
+		alloc = &device->alloc;
+	pipeline->device = device;
+	pipeline->layout = val_pipeline_layout_from_handle(pCreateInfo->layout);
 
-   deep_copy_compute_create_info(&pipeline->compute_create_info, pCreateInfo);
-   pipeline->is_compute_pipeline = true;
+	deep_copy_compute_create_info(&pipeline->compute_create_info, pCreateInfo);
+	pipeline->is_compute_pipeline = true;
 
-   val_pipeline_compile(pipeline, module,
+	for (int i = 0; i < MESA_SHADER_STAGES; i++)
+		pipeline->pipeline_tgsi[i] = NULL;
+
+	val_pipeline_compile(pipeline, module,
 			pCreateInfo->stage.pName,
 			MESA_SHADER_COMPUTE,
 			pCreateInfo->stage.pSpecializationInfo);
-   return VK_SUCCESS;
+	return VK_SUCCESS;
 }
 
 static VkResult
