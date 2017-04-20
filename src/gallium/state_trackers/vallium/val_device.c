@@ -7,6 +7,8 @@
 #include "pipe/p_state.h"
 #include "state_tracker/drisw_api.h"
 
+#include "loader/loader.h"
+
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
@@ -193,7 +195,7 @@ VkResult val_EnumeratePhysicalDevices(
 				      VkPhysicalDevice*                           pPhysicalDevices)
 {
 	VAL_FROM_HANDLE(val_instance, instance, _instance);
-	VkResult result;
+	VkResult result = VK_ERROR_INCOMPATIBLE_DRIVER;
 
 	if (instance->physicalDeviceCount < 0) {
 
@@ -202,10 +204,24 @@ VkResult val_EnumeratePhysicalDevices(
 
 		assert(instance->num_devices == 1);
 
-		pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf);
+		int fd = -1;
+		char path[20];
+		for (unsigned i = 0; i < 8; i++) {
+			snprintf(path, sizeof(path), "/dev/dri/renderD%d", 128 + i);
+			fd = loader_open_device(path);
+			if (fd >= 0) break;
+		}
 
+		if (fd >= 0 && pipe_loader_drm_probe_fd(&instance->devs, fd)) {
+			fprintf(stderr, "use real device %s.\n", instance->devs[0].driver_name);
+			result = val_physical_device_init(&instance->physicalDevice,
+							instance, &instance->devs[0]);
+		} else if (pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf)) {
+			fprintf(stderr, "use software failback %s.\n", instance->devs[0].driver_name);
 		result = val_physical_device_init(&instance->physicalDevice,
-						instance, &instance->devs[0]);
+							instance, &instance->devs[0]);
+		}
+
 		if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
 			instance->physicalDeviceCount = 0;
 		} else if (result == VK_SUCCESS) {
