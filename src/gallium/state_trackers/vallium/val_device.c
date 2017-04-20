@@ -18,6 +18,8 @@ val_physical_device_init(struct val_physical_device *device,
 	device->instance = instance;
 	device->pld = pld;
 
+	val_init_wsi(device);
+
 	device->pscreen = pipe_loader_create_screen(device->pld);
 	if (!device->pscreen)
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -137,13 +139,9 @@ VkResult val_CreateInstance(
    instance->apiVersion = client_version;
    instance->physicalDeviceCount = -1;
 
-   memset(instance->wsi, 0, sizeof(instance->wsi));
-
    //   _mesa_locale_init();
 
    //   VG(VALGRIND_CREATE_MEMPOOL(instance, 0, false));
-
-   val_init_wsi(instance);
 
    *pInstance = val_instance_to_handle(instance);
 
@@ -156,11 +154,11 @@ void val_DestroyInstance(
 			 VkInstance                                  _instance,
 			 const VkAllocationCallbacks*                pAllocator)
 {
-   VAL_FROM_HANDLE(val_instance, instance, _instance);
+	VAL_FROM_HANDLE(val_instance, instance, _instance);
 
-   val_finish_wsi(instance);
-   //   _mesa_locale_fini();
-   vk_free(&instance->alloc, instance);
+	val_finish_wsi(&instance->physicalDevice);
+	//   _mesa_locale_fini();
+	vk_free(&instance->alloc, instance);
 }
 
 static void val_get_image(struct dri_drawable *dri_drawable,
@@ -216,9 +214,11 @@ VkResult val_EnumeratePhysicalDevices(
 			fprintf(stderr, "use real device %s.\n", instance->devs[0].driver_name);
 			result = val_physical_device_init(&instance->physicalDevice,
 							instance, &instance->devs[0]);
-		} else if (pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf)) {
+		}
+
+		if (result != VK_SUCCESS && pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf)) {
 			fprintf(stderr, "use software failback %s.\n", instance->devs[0].driver_name);
-		result = val_physical_device_init(&instance->physicalDevice,
+			result = val_physical_device_init(&instance->physicalDevice,
 							instance, &instance->devs[0]);
 		}
 
@@ -551,6 +551,7 @@ VkResult val_CreateDevice(
 
    device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
    device->instance = physical_device->instance;
+   device->physical_device = physical_device;
 
    if (pAllocator)
       device->alloc = *pAllocator;

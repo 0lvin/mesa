@@ -24,32 +24,40 @@
 #include "val_wsi.h"
 
 VkResult
-val_init_wsi(struct val_instance *instance)
+val_init_wsi(struct val_physical_device *physical_device)
 {
-   VkResult result;
+	VkResult result;
 
-   result = val_x11_init_wsi(instance);
-   if (result != VK_SUCCESS)
-      return result;
+	memset(physical_device->wsi, 0, sizeof(physical_device->wsi));
+#ifdef VK_USE_PLATFORM_XCB_KHR
+	result = val_x11_init_wsi(physical_device);
+	if (result != VK_SUCCESS)
+		return result;
+#endif
 
 #ifdef HAVE_WAYLAND_PLATFORM
-   result = val_wl_init_wsi(instance);
-   if (result != VK_SUCCESS) {
-      val_x11_finish_wsi(instance);
-      return result;
-   }
+	result = val_wl_init_wsi(physical_device);
+	if (result != VK_SUCCESS) {
+#ifdef VK_USE_PLATFORM_XCB_KHR
+		val_x11_finish_wsi(physical_device);
+#endif
+		return result;
+	}
 #endif
 
    return VK_SUCCESS;
 }
 
 void
-val_finish_wsi(struct val_instance *instance)
+val_finish_wsi(struct val_physical_device *physical_device)
 {
 #ifdef HAVE_WAYLAND_PLATFORM
-   val_wl_finish_wsi(instance);
+	val_wl_finish_wsi(physical_device);
 #endif
-   val_x11_finish_wsi(instance);
+
+#ifdef VK_USE_PLATFORM_XCB_KHR
+	val_x11_finish_wsi(physical_device);
+#endif
 }
 
 void val_DestroySurfaceKHR(
@@ -71,7 +79,7 @@ VkResult val_GetPhysicalDeviceSurfaceSupportKHR(
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
-   struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
+   struct val_wsi_interface *iface = device->wsi[surface->platform];
 
    return iface->get_support(surface, device, queueFamilyIndex, pSupported);
 }
@@ -83,7 +91,7 @@ VkResult val_GetPhysicalDeviceSurfaceCapabilitiesKHR(
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
-   struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
+   struct val_wsi_interface *iface = device->wsi[surface->platform];
 
    return iface->get_capabilities(surface, device, pSurfaceCapabilities);
 }
@@ -96,7 +104,7 @@ VkResult val_GetPhysicalDeviceSurfaceFormatsKHR(
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
-   struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
+   struct val_wsi_interface *iface = device->wsi[surface->platform];
 
    return iface->get_formats(surface, device, pSurfaceFormatCount,
                              pSurfaceFormats);
@@ -110,7 +118,7 @@ VkResult val_GetPhysicalDeviceSurfacePresentModesKHR(
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, _surface);
-   struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
+   struct val_wsi_interface *iface = device->wsi[surface->platform];
 
    return iface->get_present_modes(surface, device, pPresentModeCount,
                                    pPresentModes);
@@ -124,7 +132,7 @@ VkResult val_CreateSwapchainKHR(
 {
    VAL_FROM_HANDLE(val_device, device, _device);
    ICD_FROM_HANDLE(VkIcdSurfaceBase, surface, pCreateInfo->surface);
-   struct val_wsi_interface *iface = device->instance->wsi[surface->platform];
+   struct val_wsi_interface *iface = device->physical_device->wsi[surface->platform];
    struct val_swapchain *swapchain;
 
    VkResult result = iface->create_swapchain(surface, device, pCreateInfo,

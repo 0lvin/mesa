@@ -67,7 +67,7 @@ struct val_swapchain {
 
 VAL_DEFINE_NONDISP_HANDLE_CASTS(val_swapchain, VkSwapchainKHR)
 
-VkResult val_x11_init_wsi(struct val_instance *instance);
-void val_x11_finish_wsi(struct val_instance *instance);
-VkResult val_wl_init_wsi(struct val_instance *instance);
-void val_wl_finish_wsi(struct val_instance *instance);
+VkResult val_x11_init_wsi(struct val_physical_device *physical_device);
+void val_x11_finish_wsi(struct val_physical_device *physical_device);
+VkResult val_wl_init_wsi(struct val_physical_device *physical_device);
+void val_wl_finish_wsi(struct val_physical_device *physical_device);

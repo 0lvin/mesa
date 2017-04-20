@@ -180,33 +180,33 @@ mesa_to_vk_shader_stage(gl_shader_stage mesa_stage)
         stage = __builtin_ffs(__tmp) - 1, __tmp;                     \
         __tmp &= ~(1 << (stage)))
 
+struct val_wsi_interaface;
+#define VK_ICD_WSI_PLATFORM_MAX 5
+
 struct val_physical_device {
     VK_LOADER_DATA                              _loader_data;
     struct val_instance *                       instance;
+
+    struct val_wsi_interface *                  wsi[VK_ICD_WSI_PLATFORM_MAX];
 
     struct pipe_loader_device *pld;
     struct pipe_screen *pscreen;
 };
 
-struct val_wsi_interaface;
-#define VK_ICD_WSI_PLATFORM_MAX 5
-
 struct val_instance {
-   VK_LOADER_DATA _loader_data;
-   VkAllocationCallbacks alloc;
+    VK_LOADER_DATA _loader_data;
+    VkAllocationCallbacks alloc;
 
-   uint32_t apiVersion;
-   int physicalDeviceCount;
-   struct val_physical_device physicalDevice;
+    uint32_t apiVersion;
+    int physicalDeviceCount;
+    struct val_physical_device physicalDevice;
 
-   struct val_wsi_interface *                  wsi[VK_ICD_WSI_PLATFORM_MAX];
-
-   struct pipe_loader_device *devs;
-   int num_devices;
+    struct pipe_loader_device *devs;
+    int num_devices;
 };
 
-VkResult val_init_wsi(struct val_instance *instance);
-void val_finish_wsi(struct val_instance *instance);
+VkResult val_init_wsi(struct val_physical_device *physical_device);
+void val_finish_wsi(struct val_physical_device *physical_device);
 
 struct val_queue {
    VK_LOADER_DATA                              _loader_data;
