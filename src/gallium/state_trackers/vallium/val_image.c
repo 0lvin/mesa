@@ -21,24 +21,22 @@ val_image_create(VkDevice _device,
    memset(image, 0, sizeof(*image));
 
    {
-      struct pipe_resource template;
+      memset(&image->template, 0, sizeof(image->template));
 
-      memset(&template, 0, sizeof(template));
-
-      template.screen = device->pscreen;
-      template.target = PIPE_TEXTURE_2D;
-      template.format = vk_format_to_pipe(pCreateInfo->format);
-      template.width0 = pCreateInfo->extent.width;
-      template.height0 = pCreateInfo->extent.height;
-      template.depth0 = pCreateInfo->extent.depth;
-      template.array_size = pCreateInfo->arrayLayers;
-      template.last_level = pCreateInfo->mipLevels - 1;
-      if (template.array_size > 1)
-	template.target = PIPE_TEXTURE_2D_ARRAY;
+      image->template.screen = device->pscreen;
+      image->template.target = PIPE_TEXTURE_2D;
+      image->template.format = vk_format_to_pipe(pCreateInfo->format);
+      image->template.width0 = pCreateInfo->extent.width;
+      image->template.height0 = pCreateInfo->extent.height;
+      image->template.depth0 = pCreateInfo->extent.depth;
+      image->template.array_size = pCreateInfo->arrayLayers;
+      image->template.last_level = pCreateInfo->mipLevels - 1;
+      if (image->template.array_size > 1)
+         image->template.target = PIPE_TEXTURE_2D_ARRAY;
       if (create_info->bind_flags)
-         template.bind = create_info->bind_flags;
+         image->template.bind = create_info->bind_flags;
       image->bo = device->pscreen->resource_create_unbacked(device->pscreen,
-                                                            &template,
+                                                            &image->template,
                                                             &image->size);
    }
    *pImage = val_image_to_handle(image);

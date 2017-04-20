@@ -14,11 +14,14 @@ val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
 			 struct pipe_loader_device *pld)
 {
+	VkResult result;
 	device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
 	device->instance = instance;
 	device->pld = pld;
 
-	val_init_wsi(device);
+	result = val_init_wsi(device);
+	if (result != VK_SUCCESS)
+		return vk_error(result);
 
 	device->pscreen = pipe_loader_create_screen(device->pld);
 	if (!device->pscreen)
@@ -971,16 +974,15 @@ VkResult val_CreateBuffer(
    buffer->offset = 0;
 
    {
-      struct pipe_resource template;
-      memset(&template, 0, sizeof(struct pipe_resource));
-      template.screen = device->pscreen;
-      template.target = PIPE_BUFFER;
-      template.format = PIPE_FORMAT_R8_UNORM;
-      template.width0 = buffer->size;
-      template.height0 = 1;
-      template.depth0 = 1;
+      memset(&buffer->template, 0, sizeof(buffer->template));
+      buffer->template.screen = device->pscreen;
+      buffer->template.target = PIPE_BUFFER;
+      buffer->template.format = PIPE_FORMAT_R8_UNORM;
+      buffer->template.width0 = buffer->size;
+      buffer->template.height0 = 1;
+      buffer->template.depth0 = 1;
       buffer->bo = device->pscreen->resource_create_unbacked(device->pscreen,
-                                                             &template,
+                                                             &buffer->template,
                                                              &buffer->total_size);
    }
    *pBuffer = val_buffer_to_handle(buffer);

@@ -13,6 +13,7 @@
 
 #include "compiler/shader_enums.h"
 #include "pipe/p_screen.h"
+#include "pipe/p_state.h"
 
 /* Pre-declarations needed for WSI entrypoints */
 struct wl_surface;
@@ -238,11 +239,16 @@ struct val_device_memory {
 };
 
 struct val_image {
-   VkImageType type;
-   VkFormat vk_format;
-   VkDeviceSize size;
-   uint32_t alignment;
-   struct pipe_resource *bo;
+	VkImageType type;
+	VkFormat vk_format;
+	VkDeviceSize size;
+	uint32_t alignment;
+
+	// template for resource_from_user_memory
+	struct pipe_resource template;
+
+	// real pipe_resource
+	struct pipe_resource *bo;
 };
 
 struct val_image_create_info {
@@ -401,28 +407,33 @@ struct val_pipeline_layout {
 };
 
 struct val_pipeline {
-   struct val_device *                          device;
-   struct val_pipeline_layout *                 layout;
+	struct val_device *                          device;
+	struct val_pipeline_layout *                 layout;
 
-   bool is_compute_pipeline;
-   const void *pipeline_tgsi[MESA_SHADER_STAGES];
-   VkGraphicsPipelineCreateInfo graphics_create_info;
-   VkComputePipelineCreateInfo compute_create_info;
+	bool is_compute_pipeline;
+	const void *pipeline_tgsi[MESA_SHADER_STAGES];
+	VkGraphicsPipelineCreateInfo graphics_create_info;
+	VkComputePipelineCreateInfo compute_create_info;
 };
 
 struct val_fence {
-   bool signaled;
+	bool signaled;
 };
 
 struct val_buffer {
-   struct val_device *                          device;
-   VkDeviceSize                                 size;
+	struct val_device *                          device;
+	VkDeviceSize                                 size;
 
-   VkBufferUsageFlags                           usage;
-   VkDeviceSize                                 offset;
+	VkBufferUsageFlags                           usage;
+	VkDeviceSize                                 offset;
 
-   struct pipe_resource *bo;
-   uint64_t total_size;
+	uint64_t total_size;
+
+	// template for resource_from_user_memory
+	struct pipe_resource template;
+
+	// real pipe_resource
+	struct pipe_resource *bo;
 };
 
 struct val_buffer_view {
