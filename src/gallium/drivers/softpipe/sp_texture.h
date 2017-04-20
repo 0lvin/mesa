@@ -68,7 +68,6 @@ struct softpipe_resource
    unsigned timestamp;
    uint64_t size_required;
    boolean backed;
-   uint64_t backing_offset;
 };
 
 

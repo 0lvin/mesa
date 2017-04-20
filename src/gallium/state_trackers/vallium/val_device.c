@@ -862,10 +862,10 @@ VkResult val_BindBufferMemory(
    VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
    if (mem) {
-      device->pscreen->resource_allocate_backing(device->pscreen,
-                                                 buffer->bo,
-                                                 mem->pmem,
-                                                 memoryOffset);
+      //device->pscreen->resource_destroy(device->pscreen, buffer->bo);
+      buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+                                                              &buffer->template,
+                                                              (char*)mem->pmem + memoryOffset);
    } else {
       device->pscreen->resource_remove_backing(device->pscreen,
                                                buffer->bo);
@@ -884,10 +884,10 @@ VkResult val_BindImageMemory(
    VAL_FROM_HANDLE(val_image, image, _image);
 
    if (mem) {
-      device->pscreen->resource_allocate_backing(device->pscreen,
-                                                 image->bo,
-                                                 mem->pmem,
-                                                 memoryOffset);
+      //device->pscreen->resource_destroy(device->pscreen, image->bo);
+      image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+                                                             &image->template,
+                                                             (char*)mem->pmem + memoryOffset);
    } else {
       device->pscreen->resource_remove_backing(device->pscreen,
                                                image->bo);
