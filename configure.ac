@@ -2667,7 +2667,7 @@ VA_MINOR=`$PKG_CONFIG --modversion libva | $SED -n 's/.*\.\(.*\)\..*$/\1/p'`
 AC_SUBST([VA_MAJOR], $VA_MAJOR)
 AC_SUBST([VA_MINOR], $VA_MINOR)
 
-AM_CONDITIONAL(HAVE_VULKAN_COMMON, test "x$VULKAN_DRIVERS" != "x")
+AM_CONDITIONAL(HAVE_VULKAN_COMMON, test "x$VULKAN_DRIVERS" != "x" || test "x$enable_vallium" = xyes)
 
 AC_SUBST([XVMC_MAJOR], 1)
 AC_SUBST([XVMC_MINOR], 0)
