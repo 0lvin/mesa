@@ -35,9 +35,12 @@ val_image_create(VkDevice _device,
          image->template.target = PIPE_TEXTURE_2D_ARRAY;
       if (create_info->bind_flags)
          image->template.bind = create_info->bind_flags;
-      image->bo = device->pscreen->resource_create_unbacked(device->pscreen,
+      image->bo = NULL;
+
+      struct pipe_resource *temp_bo = device->pscreen->resource_create_unbacked(device->pscreen,
                                                             &image->template,
                                                             &image->size);
+      device->pscreen->resource_destroy(device->pscreen, temp_bo);
    }
    *pImage = val_image_to_handle(image);
 

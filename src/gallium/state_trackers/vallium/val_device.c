@@ -792,6 +792,7 @@ VkResult val_FlushMappedMemoryRanges(
 {
    return VK_SUCCESS;
 }
+
 VkResult val_InvalidateMappedMemoryRanges(
 					  VkDevice                                    _device,
 					  uint32_t                                    memoryRangeCount,
@@ -862,7 +863,6 @@ VkResult val_BindBufferMemory(
    VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
    if (mem) {
-      //device->pscreen->resource_destroy(device->pscreen, buffer->bo);
       buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
                                                               &buffer->template,
                                                               (char*)mem->pmem + memoryOffset);
@@ -884,7 +884,6 @@ VkResult val_BindImageMemory(
    VAL_FROM_HANDLE(val_image, image, _image);
 
    if (mem) {
-      //device->pscreen->resource_destroy(device->pscreen, image->bo);
       image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
                                                              &image->template,
                                                              (char*)mem->pmem + memoryOffset);
@@ -981,9 +980,13 @@ VkResult val_CreateBuffer(
       buffer->template.width0 = buffer->size;
       buffer->template.height0 = 1;
       buffer->template.depth0 = 1;
-      buffer->bo = device->pscreen->resource_create_unbacked(device->pscreen,
+
+      buffer->bo = NULL;
+
+      struct pipe_resource *temp_bo = device->pscreen->resource_create_unbacked(device->pscreen,
                                                              &buffer->template,
                                                              &buffer->total_size);
+      device->pscreen->resource_destroy(device->pscreen, temp_bo);
    }
    *pBuffer = val_buffer_to_handle(buffer);
 
