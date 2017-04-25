@@ -159,3 +159,15 @@ val_DestroyBufferView(VkDevice _device, VkBufferView bufferView,
 
    vk_free2(&device->alloc, pAllocator, view);
 }
+
+void
+val_CmdClearColorImage(
+	VkCommandBuffer                             commandBuffer,
+	VkImage                                     image_h,
+	VkImageLayout                               imageLayout,
+	const VkClearColorValue*                    pColor,
+	uint32_t                                    rangeCount,
+	const VkImageSubresourceRange*              pRanges)
+{
+	val_finishme("Implement %s", __func__);
+}

@@ -159,7 +159,9 @@ void val_DestroyInstance(
 {
 	VAL_FROM_HANDLE(val_instance, instance, _instance);
 
-	val_finish_wsi(&instance->physicalDevice);
+	if (   instance->physicalDeviceCount != -1) {
+		val_finish_wsi(&instance->physicalDevice);
+	}
 	//   _mesa_locale_fini();
 	vk_free(&instance->alloc, instance);
 }

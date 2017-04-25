@@ -511,3 +511,25 @@ void val_CmdDispatchIndirect(
    list_addtail(&cmd->cmd_link, &cmd_buffer->cmds);
 
 }
+
+void val_CmdWaitEvents(VkCommandBuffer commandBuffer,
+			uint32_t eventCount,
+			const VkEvent* pEvents,
+			VkPipelineStageFlags srcStageMask,
+			VkPipelineStageFlags dstStageMask,
+			uint32_t memoryBarrierCount,
+			const VkMemoryBarrier* pMemoryBarriers,
+			uint32_t bufferMemoryBarrierCount,
+			const VkBufferMemoryBarrier* pBufferMemoryBarriers,
+			uint32_t imageMemoryBarrierCount,
+			const VkImageMemoryBarrier* pImageMemoryBarriers)
+{
+	val_finishme("Implement %s", __func__);
+}
+
+void val_CmdNextSubpass(
+    VkCommandBuffer                             commandBuffer,
+    VkSubpassContents                           contents)
+{
+	val_finishme("Implement %s", __func__);
+}

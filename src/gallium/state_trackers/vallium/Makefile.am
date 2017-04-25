@@ -48,6 +48,7 @@ VALLIUM_SOURCES = \
 	val_sampler.c \
 	val_query.c \
 	val_wsi.c \
+	val_meta_blit.c \
 	val_wsi_x11.c
 
 BUILT_SOURCES =                                         \

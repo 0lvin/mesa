@@ -730,14 +730,14 @@ fail:
 void
 val_x11_finish_wsi(struct val_physical_device *physical_device)
 {
-   struct wsi_x11 *wsi =
-      (struct wsi_x11 *)physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB];
+	struct wsi_x11 *wsi =
+		(struct wsi_x11 *)physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB];
 
-   if (wsi) {
-      _mesa_hash_table_destroy(wsi->connections, NULL);
+	if (wsi) {
+		_mesa_hash_table_destroy(wsi->connections, NULL);
 
-      pthread_mutex_destroy(&wsi->mutex);
+		pthread_mutex_destroy(&wsi->mutex);
 
-      vk_free(&physical_device->instance->alloc, wsi);
-   }
+		vk_free(&physical_device->instance->alloc, wsi);
+	}
 }

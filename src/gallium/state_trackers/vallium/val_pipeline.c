@@ -128,20 +128,18 @@ deep_copy_viewport_state(VkPipelineViewportStateCreateInfo *dst,
       viewports = malloc(src->viewportCount * sizeof(VkViewport));
       for (i = 0; i < src->viewportCount; i++)
          memcpy(&viewports[i], &src->pViewports[i], sizeof(VkViewport));
-      dst->viewportCount = src->viewportCount;
-   } else
-      dst->viewportCount = 0;
+   }
 
+   dst->viewportCount = src->viewportCount;
    dst->pViewports = viewports;
 
    if (src->pScissors) {
       scissors = malloc(src->scissorCount * sizeof(VkRect2D));
       for (i = 0; i < src->scissorCount; i++)
          memcpy(&scissors[i], &src->pScissors[i], sizeof(VkRect2D));
-      dst->scissorCount = src->scissorCount;
-   } else
-      dst->scissorCount = 0;
+   }
 
+   dst->scissorCount = src->scissorCount;
    dst->pScissors = scissors;
 
    return VK_SUCCESS;

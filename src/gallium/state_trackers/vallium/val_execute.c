@@ -324,24 +324,26 @@ static VkResult handle_graphics_pipeline(struct val_cmd_buffer_entry *cmd,
       state->info.primitive_restart = ia->primitiveRestartEnable;
    }
 
-   if (pipeline->graphics_create_info.pViewportState) {
-      const VkPipelineViewportStateCreateInfo *vpi= pipeline->graphics_create_info.pViewportState;
-      int i;
+	if (pipeline->graphics_create_info.pViewportState) {
+		const VkPipelineViewportStateCreateInfo *vpi= pipeline->graphics_create_info.pViewportState;
+		int i;
 
-      if (!dynamic_state_viewport) {
-         for (i = 0; i < vpi->viewportCount; i++) {
-            const VkViewport *vp = &vpi->pViewports[i];
-            state->viewports[i].scale[0] = vp->width / 2;
-            state->viewports[i].scale[1] = vp->height / 2;
-            state->viewports[i].scale[2] = 1.0;
-            state->viewports[i].translate[0] = vp->x + vp->width / 2;
-            state->viewports[i].translate[1] = vp->y + vp->height / 2;
-            state->viewports[i].translate[2] = 0.0;
-         }
-         state->vp_dirty = true;
-      }
-   }
-   return VK_SUCCESS;
+		if (!dynamic_state_viewport) {
+			if (vpi->pViewports) {
+				for (i = 0; i < vpi->viewportCount; i++) {
+					const VkViewport *vp = &vpi->pViewports[i];
+					state->viewports[i].scale[0] = vp->width / 2;
+					state->viewports[i].scale[1] = vp->height / 2;
+					state->viewports[i].scale[2] = 1.0;
+					state->viewports[i].translate[0] = vp->x + vp->width / 2;
+					state->viewports[i].translate[1] = vp->y + vp->height / 2;
+					state->viewports[i].translate[2] = 0.0;
+				}
+			}
+			state->vp_dirty = true;
+		}
+	}
+	return VK_SUCCESS;
 }
 
 static VkResult handle_pipeline(struct val_cmd_buffer_entry *cmd,
