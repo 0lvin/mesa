@@ -506,7 +506,6 @@ struct pipe_resource
    struct pipe_resource *next;
 };
 
-struct pipe_memory_allocation;
 
 /**
  * Transfer object.  For data transfer to/from a resource.

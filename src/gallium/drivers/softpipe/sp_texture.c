@@ -197,13 +197,6 @@ softpipe_resource_create_front(struct pipe_screen *screen,
 }
 
 static struct pipe_resource *
-softpipe_resource_create(struct pipe_screen *screen,
-                         const struct pipe_resource *templat)
-{
-  return softpipe_resource_create_all(screen, templat, NULL, true);
-}
-
-static struct pipe_resource *
 softpipe_buffer_from_user_memory(struct pipe_screen *screen,
 			     const struct pipe_resource *templ,
 			     void *user_memory)
@@ -217,6 +210,13 @@ softpipe_buffer_from_user_memory(struct pipe_screen *screen,
    spr->userBuffer = TRUE;
    spr->data = (char *)user_memory;
    return pt;
+}
+
+static struct pipe_resource *
+softpipe_resource_create(struct pipe_screen *screen,
+                         const struct pipe_resource *templat)
+{
+  return softpipe_resource_create_front(screen, templat, NULL);
 }
 
 static void
@@ -546,6 +546,7 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->create_surface = softpipe_create_surface;
    pipe->surface_destroy = softpipe_surface_destroy;
 }
+
 
 void
 softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
