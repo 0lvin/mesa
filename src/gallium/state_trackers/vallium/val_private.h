@@ -262,6 +262,8 @@ val_image_create(VkDevice _device,
                  const struct val_image_create_info *create_info,
                  const VkAllocationCallbacks* alloc,
                  VkImage *pImage);
+uint64_t
+val_texture_size(struct pipe_resource *pt);
 
 struct val_image_view {
    const struct val_image *image; /**< VkImageViewCreateInfo::image */

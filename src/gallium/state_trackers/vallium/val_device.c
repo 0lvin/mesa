@@ -12,7 +12,7 @@
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
-			 struct pipe_loader_device *pld)
+                         struct pipe_loader_device *pld)
 {
 	VkResult result;
 	device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
@@ -984,11 +984,7 @@ VkResult val_CreateBuffer(
       buffer->template.depth0 = 1;
 
       buffer->bo = NULL;
-
-      struct pipe_resource *temp_bo = device->pscreen->resource_create_unbacked(device->pscreen,
-                                                             &buffer->template,
-                                                             &buffer->total_size);
-      device->pscreen->resource_destroy(device->pscreen, temp_bo);
+      buffer->total_size = val_texture_size(&buffer->template);
    }
    *pBuffer = val_buffer_to_handle(buffer);
 

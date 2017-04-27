@@ -1,6 +1,49 @@
 #include "val_private.h"
 #include "util/u_format.h"
 #include "pipe/p_state.h"
+
+#include "util/u_format.h"
+#include "util/u_math.h"
+
+uint64_t
+val_texture_size(struct pipe_resource *pt)
+{
+   unsigned level;
+   unsigned stride_level;
+   unsigned width = pt->width0;
+   unsigned height = pt->height0;
+   unsigned depth = pt->depth0;
+   unsigned buffer_size = 0;
+
+   if (pt->target == PIPE_BUFFER)
+      return pt->width0;
+
+   for (level = 0; level <= pt->last_level; level++) {
+      unsigned slices;
+
+      if (pt->target == PIPE_TEXTURE_CUBE)
+         slices = 6;
+      else if (pt->target == PIPE_TEXTURE_3D)
+         slices = depth;
+      else
+         slices = pt->array_size;
+
+      stride_level = util_format_get_stride(pt->format, width);
+
+      buffer_size += (util_format_get_nblocksy(pt->format, height) *
+                      slices * stride_level);
+
+      width = u_minify(width, 1);
+      height = u_minify(height, 1);
+      depth = u_minify(depth, 1);
+   }
+
+   if (pt->nr_samples <= 1)
+      return buffer_size;
+   else /* don't create guest backing store for MSAA */
+      return 0;
+}
+
 VkResult
 val_image_create(VkDevice _device,
                  const struct val_image_create_info *create_info,
@@ -37,10 +80,7 @@ val_image_create(VkDevice _device,
          image->template.bind = create_info->bind_flags;
       image->bo = NULL;
 
-      struct pipe_resource *temp_bo = device->pscreen->resource_create_unbacked(device->pscreen,
-                                                            &image->template,
-                                                            &image->size);
-      device->pscreen->resource_destroy(device->pscreen, temp_bo);
+      image->size = val_texture_size(&image->template);
    }
    *pImage = val_image_to_handle(image);
 
