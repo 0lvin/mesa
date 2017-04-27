@@ -66,7 +66,6 @@ struct softpipe_resource
    boolean userBuffer;
 
    unsigned timestamp;
-   boolean backed;
 };
 
 

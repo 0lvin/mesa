@@ -760,7 +760,6 @@ VkResult val_MapMemory(
 		       VkMemoryMapFlags                            flags,
 		       void**                                      ppData)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
    VAL_FROM_HANDLE(val_device_memory, mem, _memory);
    void *map;
    if (mem == NULL) {
@@ -768,7 +767,10 @@ VkResult val_MapMemory(
       return VK_SUCCESS;
    }
 
-   map = device->pscreen->map_memory(device->pscreen, mem->pmem);
+   val_finishme("Implement %s", __func__);
+
+   // fake map
+   map = mem->pmem;
 
    *ppData = map + offset;
    return VK_SUCCESS;
@@ -778,13 +780,12 @@ void val_UnmapMemory(
 		     VkDevice                                    _device,
 		     VkDeviceMemory                              _memory)
 {
-	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 
 	if (mem == NULL)
 		return;
 
-	device->pscreen->unmap_memory(device->pscreen, mem->pmem);
+	val_finishme("Implement %s", __func__);
 }
 
 VkResult val_FlushMappedMemoryRanges(

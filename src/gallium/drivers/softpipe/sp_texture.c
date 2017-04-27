@@ -214,7 +214,7 @@ softpipe_buffer_from_user_memory(struct pipe_screen *screen,
    if (!pt)
       return pt;
    spr = softpipe_resource(pt);
-   spr->backed = true;
+   spr->userBuffer = TRUE;
    spr->data = (char *)user_memory;
    return pt;
 }
@@ -547,17 +547,6 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->surface_destroy = softpipe_surface_destroy;
 }
 
-static void *softpipe_map_memory(struct pipe_screen *screen,
-                                 struct pipe_memory_allocation *pmem)
-{
-   return pmem;
-}
-
-static void softpipe_unmap_memory(struct pipe_screen *screen,
-                                  struct pipe_memory_allocation *pmem)
-{
-}
-
 void
 softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
 {
@@ -568,7 +557,4 @@ softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
    screen->resource_get_handle = softpipe_resource_get_handle;
    screen->can_create_resource = softpipe_can_create_resource;
    screen->resource_from_user_memory = softpipe_buffer_from_user_memory;
-
-   screen->map_memory = softpipe_map_memory;
-   screen->unmap_memory = softpipe_unmap_memory;
 }

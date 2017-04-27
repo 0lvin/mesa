@@ -300,12 +300,6 @@ struct pipe_screen {
    const void *(*get_compiler_options)(struct pipe_screen *screen,
                                       enum pipe_shader_ir ir,
                                       unsigned shader);
-
-   void *(*map_memory)(struct pipe_screen *screen,
-                       struct pipe_memory_allocation *pmem);
-
-   void (*unmap_memory)(struct pipe_screen *screen,
-                        struct pipe_memory_allocation *pmem);
 };
 
 
