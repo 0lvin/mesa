@@ -301,16 +301,6 @@ struct pipe_screen {
                                       enum pipe_shader_ir ir,
                                       unsigned shader);
 
-   struct pipe_resource * (*resource_create_unbacked)(struct pipe_screen *,
-						      const struct pipe_resource *templat,
-                                                      uint64_t *size_required);
-   void (*resource_allocate_backing)(struct pipe_screen *screen,
-				     struct pipe_resource *pt,
-                                     struct pipe_memory_allocation *pmem,
-                                     uint64_t offset);
-   void (*resource_remove_backing)(struct pipe_screen *screen,
-                                   struct pipe_resource *pt);
-
    void *(*map_memory)(struct pipe_screen *screen,
                        struct pipe_memory_allocation *pmem);
 

@@ -97,7 +97,6 @@ softpipe_resource_layout(struct pipe_screen *screen,
    if (buffer_size > SP_MAX_TEXTURE_SIZE)
       return FALSE;
 
-   spr->size_required = buffer_size;
    if (allocate) {
       spr->data = align_malloc(buffer_size, 64);
       return spr->data != NULL;
@@ -202,22 +201,6 @@ softpipe_resource_create(struct pipe_screen *screen,
                          const struct pipe_resource *templat)
 {
   return softpipe_resource_create_all(screen, templat, NULL, true);
-}
-
-static struct pipe_resource *
-softpipe_resource_create_unbacked(struct pipe_screen *screen,
-				  const struct pipe_resource *templat,
-                                  uint64_t *size_required)
-{
-   struct pipe_resource *pt;
-   struct softpipe_resource *spr;
-   pt = softpipe_resource_create_all(screen, templat, NULL, false);
-   if (!pt)
-      return pt;
-   spr = softpipe_resource(pt);
-   spr->backed = false;
-   *size_required = spr->size_required;
-   return pt;
 }
 
 static struct pipe_resource *
@@ -564,18 +547,6 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->surface_destroy = softpipe_surface_destroy;
 }
 
-static void softpipe_resource_remove_backing(struct pipe_screen *screen,
-                                             struct pipe_resource *pt)
-{
-   struct softpipe_resource *spr = softpipe_resource(pt);
-
-   if (!spr->backed)
-      return;
-
-   spr->backed = false;
-   spr->data = NULL;
-}
-
 static void *softpipe_map_memory(struct pipe_screen *screen,
                                  struct pipe_memory_allocation *pmem)
 {
@@ -596,12 +567,8 @@ softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
    screen->resource_from_handle = softpipe_resource_from_handle;
    screen->resource_get_handle = softpipe_resource_get_handle;
    screen->can_create_resource = softpipe_can_create_resource;
-   screen->resource_create_unbacked = softpipe_resource_create_unbacked;
    screen->resource_from_user_memory = softpipe_buffer_from_user_memory;
 
    screen->map_memory = softpipe_map_memory;
    screen->unmap_memory = softpipe_unmap_memory;
-
-   screen->resource_remove_backing = softpipe_resource_remove_backing;
-
 }

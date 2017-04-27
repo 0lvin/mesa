@@ -869,8 +869,8 @@ VkResult val_BindBufferMemory(
                                                               &buffer->template,
                                                               (char*)mem->pmem + memoryOffset);
    } else {
-      device->pscreen->resource_remove_backing(device->pscreen,
-                                               buffer->bo);
+      device->pscreen->resource_destroy(device->pscreen, buffer->bo);
+      buffer->bo = NULL;
    }
    return VK_SUCCESS;
 }
@@ -890,8 +890,8 @@ VkResult val_BindImageMemory(
                                                              &image->template,
                                                              (char*)mem->pmem + memoryOffset);
    } else {
-      device->pscreen->resource_remove_backing(device->pscreen,
-                                               image->bo);
+      device->pscreen->resource_destroy(device->pscreen, image->bo);
+      image->bo = NULL;
    }
    return VK_SUCCESS;
 }
