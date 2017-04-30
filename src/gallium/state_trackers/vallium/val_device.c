@@ -9,6 +9,9 @@
 
 #include "loader/loader.h"
 
+#include "util/u_memory.h"
+#include "util/u_cpu_detect.h"
+
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
                          struct val_instance *instance,
@@ -93,9 +96,9 @@ VkResult val_CreateInstance(
     const VkAllocationCallbacks*                pAllocator,
     VkInstance*                                 pInstance)
 {
-   struct val_instance *instance;
+	struct val_instance *instance;
 
-   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+	assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
 
 	uint32_t client_version;
 	if (pCreateInfo->pApplicationInfo &&
@@ -114,42 +117,44 @@ VkResult val_CreateInstance(
 				 VK_VERSION_PATCH(client_version));
 	}
 
-   for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
-      bool found = false;
-      for (uint32_t j = 0; j < ARRAY_SIZE(global_extensions); j++) {
-         if (strcmp(pCreateInfo->ppEnabledExtensionNames[i],
-                    global_extensions[j].extensionName) == 0) {
-            found = true;
-            break;
-         }
-      }
-      if (!found)
-         return vk_error(VK_ERROR_EXTENSION_NOT_PRESENT);
-   }
+	for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
+		bool found = false;
+		for (uint32_t j = 0; j < ARRAY_SIZE(global_extensions); j++) {
+			if (strcmp(pCreateInfo->ppEnabledExtensionNames[i],
+			    global_extensions[j].extensionName) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return vk_error(VK_ERROR_EXTENSION_NOT_PRESENT);
+	}
 
-   instance = vk_alloc2(&default_alloc, pAllocator, sizeof(*instance), 8,
-                         VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
-   if (!instance)
-     return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	instance = vk_alloc2(&default_alloc, pAllocator, sizeof(*instance), 8,
+					VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
+	if (!instance)
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   instance->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
+	instance->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
 
-   if (pAllocator)
-      instance->alloc = *pAllocator;
-   else
-      instance->alloc = default_alloc;
+	if (pAllocator)
+		instance->alloc = *pAllocator;
+	else
+		instance->alloc = default_alloc;
 
-   instance->apiVersion = client_version;
-   instance->physicalDeviceCount = -1;
+	instance->apiVersion = client_version;
+	instance->physicalDeviceCount = -1;
 
-   //   _mesa_locale_init();
+	util_cpu_detect();
 
-   //   VG(VALGRIND_CREATE_MEMPOOL(instance, 0, false));
+	//   _mesa_locale_init();
 
-   *pInstance = val_instance_to_handle(instance);
+	//   VG(VALGRIND_CREATE_MEMPOOL(instance, 0, false));
 
-   fprintf(stderr, "got into create instance\n");
-   return VK_SUCCESS;
+	*pInstance = val_instance_to_handle(instance);
+
+	fprintf(stderr, "got into create instance\n");
+	return VK_SUCCESS;
 }
 
 
@@ -704,6 +709,8 @@ VkResult val_AllocateMemory(
 {
 	VAL_FROM_HANDLE(val_device, device, _device);
 	struct val_device_memory *mem;
+	unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
+
 	assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
 
 	if (pAllocateInfo->allocationSize == 0) {
@@ -718,8 +725,7 @@ VkResult val_AllocateMemory(
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
 	uint64_t alloc_size = align_u64(pAllocateInfo->allocationSize, 4096);
-	mem->pmem = vk_alloc2(&device->alloc, pAllocator, alloc_size, 8,
-			  VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	mem->pmem = align_malloc(alloc_size, allocate_align);
 	if (!mem->pmem) {
 		vk_free2(&device->alloc, pAllocator, mem);
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -748,7 +754,7 @@ void val_FreeMemory(
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
 
-	vk_free2(&device->alloc, pAllocator, mem->pmem);
+	align_free(mem->pmem);
 	vk_free2(&device->alloc, pAllocator, mem);
 }
 
@@ -861,19 +867,21 @@ VkResult val_BindBufferMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
-   VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
-   if (mem) {
-      buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
-                                                              &buffer->template,
-                                                              (char*)mem->pmem + memoryOffset);
-   } else {
-      device->pscreen->resource_destroy(device->pscreen, buffer->bo);
-      buffer->bo = NULL;
-   }
-   return VK_SUCCESS;
+	if (mem) {
+		buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+								  &buffer->template,
+								  (char*)mem->pmem + memoryOffset);
+		if (!buffer->bo)
+			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+	} else {
+		device->pscreen->resource_destroy(device->pscreen, buffer->bo);
+		buffer->bo = NULL;
+	}
+	return VK_SUCCESS;
 }
 
 VkResult val_BindImageMemory(
@@ -882,19 +890,21 @@ VkResult val_BindImageMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
-   VAL_FROM_HANDLE(val_image, image, _image);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+	VAL_FROM_HANDLE(val_image, image, _image);
 
-   if (mem) {
-      image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
-                                                             &image->template,
-                                                             (char*)mem->pmem + memoryOffset);
-   } else {
-      device->pscreen->resource_destroy(device->pscreen, image->bo);
-      image->bo = NULL;
-   }
-   return VK_SUCCESS;
+	if (mem) {
+		image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+								 &image->template,
+								 (char*)mem->pmem + memoryOffset);
+		if (!image->bo)
+			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+	} else {
+		device->pscreen->resource_destroy(device->pscreen, image->bo);
+		image->bo = NULL;
+	}
+	return VK_SUCCESS;
 }
 
 VkResult val_QueueBindSparse(

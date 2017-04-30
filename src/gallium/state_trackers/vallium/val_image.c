@@ -4,6 +4,7 @@
 
 #include "util/u_format.h"
 #include "util/u_math.h"
+#include "util/u_cpu_detect.h"
 
 uint64_t
 val_texture_size(struct pipe_resource *pt)
@@ -14,6 +15,8 @@ val_texture_size(struct pipe_resource *pt)
    unsigned height = pt->height0;
    unsigned depth = pt->depth0;
    unsigned buffer_size = 0;
+
+   unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
 
    if (pt->target == PIPE_BUFFER)
       return pt->width0;
@@ -30,18 +33,15 @@ val_texture_size(struct pipe_resource *pt)
 
       stride_level = util_format_get_stride(pt->format, width);
 
-      buffer_size += (util_format_get_nblocksy(pt->format, height) *
-                      slices * stride_level);
+      buffer_size += align_u64(util_format_get_nblocksy(pt->format, height) *
+                      slices * stride_level, allocate_align);
 
       width = u_minify(width, 1);
       height = u_minify(height, 1);
       depth = u_minify(depth, 1);
    }
 
-   if (pt->nr_samples <= 1)
-      return buffer_size;
-   else /* don't create guest backing store for MSAA */
-      return 0;
+   return buffer_size;
 }
 
 VkResult
