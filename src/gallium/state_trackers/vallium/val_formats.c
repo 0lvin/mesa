@@ -116,7 +116,7 @@ VkResult val_GetPhysicalDeviceImageFormatProperties(
     VkImageCreateFlags                          createFlags,
     VkImageFormatProperties*                    pImageFormatProperties)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -130,7 +130,7 @@ void val_GetPhysicalDeviceSparseImageFormatProperties(
     uint32_t*                                   pNumProperties,
     VkSparseImageFormatProperties*              pProperties)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	/* Sparse images are not yet supported. */
 	*pNumProperties = 0;
 }

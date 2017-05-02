@@ -688,7 +688,7 @@ VkResult val_QueueSubmit(
 VkResult val_QueueWaitIdle(
 			   VkQueue                                     _queue)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -696,7 +696,7 @@ VkResult val_QueueWaitIdle(
 VkResult val_DeviceWaitIdle(
 			    VkDevice                                    _device)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -773,7 +773,7 @@ VkResult val_MapMemory(
       return VK_SUCCESS;
    }
 
-   val_finishme("Implement %s", __func__);
+   val_finishme("%s: Not implemented.", __func__);
 
    // fake map
    map = mem->pmem;
@@ -791,7 +791,7 @@ void val_UnmapMemory(
 	if (mem == NULL)
 		return;
 
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 }
 
 VkResult val_FlushMappedMemoryRanges(
@@ -872,11 +872,19 @@ VkResult val_BindBufferMemory(
 	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
 	if (mem) {
-		buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+		if (device->pscreen->resource_from_user_memory) {
+			buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
 								  &buffer->template,
 								  (char*)mem->pmem + memoryOffset);
-		if (!buffer->bo)
+		}
+		if (!buffer->bo) {
+			val_finishme("%s:%d Use failback", __func__, __LINE__);
+			buffer->bo = device->pscreen->resource_create(device->pscreen,
+								&buffer->template);
+		}
+		if (!buffer->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+		}
 	} else {
 		device->pscreen->resource_destroy(device->pscreen, buffer->bo);
 		buffer->bo = NULL;
@@ -895,11 +903,19 @@ VkResult val_BindImageMemory(
 	VAL_FROM_HANDLE(val_image, image, _image);
 
 	if (mem) {
-		image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
+		if (device->pscreen->resource_from_user_memory) {
+			image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
 								 &image->template,
 								 (char*)mem->pmem + memoryOffset);
-		if (!image->bo)
+		}
+		if (!image->bo) {
+			val_finishme("%s:%d Use failback", __func__, __LINE__);
+			image->bo = device->pscreen->resource_create(device->pscreen,
+								&image->template);
+		}
+		if (!image->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+		}
 	} else {
 		device->pscreen->resource_destroy(device->pscreen, image->bo);
 		image->bo = NULL;
@@ -950,7 +966,7 @@ VkResult val_ResetFences(
     uint32_t                                    fenceCount,
     const VkFence*                              pFences)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -958,7 +974,7 @@ VkResult val_GetFenceStatus(
     VkDevice                                    _device,
     VkFence                                     _fence)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -1065,7 +1081,7 @@ VkResult val_WaitForFences(
     VkBool32                                    waitAll,
     uint64_t                                    timeout)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -1081,7 +1097,7 @@ VkResult val_CreateSemaphore(
 
    *pSemaphore = (VkSemaphore)1;
 
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -1090,7 +1106,7 @@ void val_DestroySemaphore(
     VkSemaphore                                 semaphore,
     const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 }
 
 
@@ -1100,7 +1116,7 @@ VkResult val_CreateEvent(
     const VkAllocationCallbacks*                pAllocator,
     VkEvent*                                    pEvent)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 	return VK_SUCCESS;
 }
 
@@ -1110,6 +1126,6 @@ void val_DestroyEvent(
     VkEvent                                     _event,
     const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 }
 

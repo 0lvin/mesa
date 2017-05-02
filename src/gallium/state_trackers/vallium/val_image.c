@@ -209,5 +209,5 @@ val_CmdClearColorImage(
 	uint32_t                                    rangeCount,
 	const VkImageSubresourceRange*              pRanges)
 {
-	val_finishme("Implement %s", __func__);
+	val_finishme("%s: Not implemented.", __func__);
 }
