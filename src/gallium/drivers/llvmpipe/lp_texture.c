@@ -1,8 +1,8 @@
 /**************************************************************************
- * 
+ *
  * Copyright 2006 VMware, Inc.
  * All Rights Reserved.
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -10,11 +10,11 @@
  * distribute, sub license, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice (including the
  * next paragraph) shall be included in all copies or substantial portions
  * of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
  * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
@@ -22,7 +22,7 @@
  * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
+ *
  **************************************************************************/
  /*
   * Authors:
@@ -237,9 +237,10 @@ llvmpipe_displaytarget_layout(struct llvmpipe_screen *screen,
 
 
 static struct pipe_resource *
-llvmpipe_resource_create_front(struct pipe_screen *_screen,
+llvmpipe_resource_create_all(struct pipe_screen *_screen,
                                const struct pipe_resource *templat,
-                               const void *map_front_private)
+                               const void *map_front_private,
+                               bool alloc_backing)
 {
    struct llvmpipe_screen *screen = llvmpipe_screen(_screen);
    struct llvmpipe_resource *lpr = CALLOC_STRUCT(llvmpipe_resource);
@@ -262,7 +263,7 @@ llvmpipe_resource_create_front(struct pipe_screen *_screen,
       }
       else {
          /* texture map */
-         if (!llvmpipe_texture_layout(screen, lpr, true))
+         if (!llvmpipe_texture_layout(screen, lpr, alloc_backing))
             goto fail;
       }
    }
@@ -303,6 +304,35 @@ llvmpipe_resource_create_front(struct pipe_screen *_screen,
    FREE(lpr);
    return NULL;
 }
+
+static struct pipe_resource *
+llvmpipe_resource_create_front(struct pipe_screen *screen,
+                               const struct pipe_resource *templat,
+                               const void *map_front_private)
+{
+    return llvmpipe_resource_create_all(screen, templat, map_front_private, true);
+}
+
+static struct pipe_resource *
+llvmpipe_buffer_from_user_memory(struct pipe_screen *screen,
+                                 const struct pipe_resource *templ,
+                                 void *user_memory)
+{
+   struct pipe_resource *pt;
+   struct llvmpipe_resource *lpr;
+   pt = llvmpipe_resource_create_all(screen, templ, NULL, false);
+   if (!pt)
+      return pt;
+   lpr = llvmpipe_resource(pt);
+   lpr->userBuffer = TRUE;
+   if (llvmpipe_resource_is_texture(pt)) {
+      lpr->tex_data = (char *)user_memory;
+   } else {
+      lpr->data = (char *)user_memory;
+   }
+   return pt;
+}
+
 static struct pipe_resource *
 llvmpipe_resource_create(struct pipe_screen *_screen,
                          const struct pipe_resource *templat)
@@ -807,6 +837,7 @@ llvmpipe_init_screen_resource_funcs(struct pipe_screen *screen)
    screen->resource_from_handle = llvmpipe_resource_from_handle;
    screen->resource_get_handle = llvmpipe_resource_get_handle;
    screen->can_create_resource = llvmpipe_can_create_resource;
+   screen->resource_from_user_memory = llvmpipe_buffer_from_user_memory;
 }
 
 
