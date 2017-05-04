@@ -82,23 +82,20 @@ VkResult val_ResetCommandBuffer(
     VkCommandBuffer                             commandBuffer,
     VkCommandBufferResetFlags                   flags)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_BeginCommandBuffer(
     VkCommandBuffer                             commandBuffer,
     const VkCommandBufferBeginInfo*             pBeginInfo)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_EndCommandBuffer(
     VkCommandBuffer                             commandBuffer)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_CreateCommandPool(
@@ -145,8 +142,7 @@ VkResult val_ResetCommandPool(
     VkCommandPool                               commandPool,
     VkCommandPoolResetFlags                     flags)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 void val_CmdBeginRenderPass(
@@ -350,14 +346,14 @@ void val_CmdSetScissor(
     uint32_t                                    scissorCount,
     const VkRect2D*                             pScissors)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetLineWidth(
     VkCommandBuffer                             commandBuffer,
     float                                       lineWidth)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetDepthBias(
@@ -366,14 +362,14 @@ void val_CmdSetDepthBias(
     float                                       depthBiasClamp,
     float                                       depthBiasSlopeFactor)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetBlendConstants(
     VkCommandBuffer                             commandBuffer,
     const float                                 blendConstants[4])
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetDepthBounds(
@@ -381,7 +377,7 @@ void val_CmdSetDepthBounds(
     float                                       minDepthBounds,
     float                                       maxDepthBounds)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetStencilCompareMask(
@@ -389,7 +385,7 @@ void val_CmdSetStencilCompareMask(
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    compareMask)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetStencilWriteMask(
@@ -397,7 +393,7 @@ void val_CmdSetStencilWriteMask(
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    writeMask)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdSetStencilReference(
@@ -405,7 +401,7 @@ void val_CmdSetStencilReference(
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    reference)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdPushConstants(
@@ -416,7 +412,7 @@ void val_CmdPushConstants(
     uint32_t                                    size,
     const void*                                 pValues)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdBindIndexBuffer(
@@ -524,12 +520,12 @@ void val_CmdWaitEvents(VkCommandBuffer commandBuffer,
 			uint32_t imageMemoryBarrierCount,
 			const VkImageMemoryBarrier* pImageMemoryBarriers)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdNextSubpass(
     VkCommandBuffer                             commandBuffer,
     VkSubpassContents                           contents)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }

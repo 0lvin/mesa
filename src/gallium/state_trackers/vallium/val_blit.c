@@ -8,7 +8,7 @@ void val_CmdCopyBufferToImage(
     uint32_t                                    regionCount,
     const VkBufferImageCopy*                    pRegions)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdCopyImageToBuffer(
@@ -93,5 +93,5 @@ void val_CmdCopyBuffer(
     uint32_t                                    regionCount,
     const VkBufferCopy*                         pRegions)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }

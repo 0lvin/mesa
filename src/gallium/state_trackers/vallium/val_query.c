@@ -6,8 +6,7 @@ VkResult val_CreateQueryPool(
     const VkAllocationCallbacks*                pAllocator,
     VkQueryPool*                                pQueryPool)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 void val_DestroyQueryPool(
@@ -15,7 +14,7 @@ void val_DestroyQueryPool(
     VkQueryPool                                 _pool,
     const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdResetQueryPool(
@@ -24,7 +23,7 @@ void val_CmdResetQueryPool(
 	uint32_t                                    firstQuery,
 	uint32_t                                    queryCount)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdBeginQuery(
@@ -33,7 +32,7 @@ void val_CmdBeginQuery(
     uint32_t                                    query,
     VkQueryControlFlags                         flags)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdEndQuery(
@@ -41,7 +40,7 @@ void val_CmdEndQuery(
     VkQueryPool                                 queryPool,
     uint32_t                                    query)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 void val_CmdCopyQueryPoolResults(
@@ -54,7 +53,7 @@ void val_CmdCopyQueryPoolResults(
     VkDeviceSize                                stride,
     VkQueryResultFlags                          flags)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 VkResult val_GetQueryPoolResults(
@@ -67,6 +66,5 @@ VkResult val_GetQueryPoolResults(
 	VkDeviceSize                                stride,
 	VkQueryResultFlags                          flags)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_NOT_READY;
+	stub_return(VK_NOT_READY);
 }

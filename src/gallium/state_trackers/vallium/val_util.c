@@ -1,8 +1,8 @@
 
 #include "val_private.h"
 
-void val_printflike(3, 4)
-__val_finishme(const char *file, int line, const char *format, ...)
+void val_printflike(4, 5)
+__val_finishme(const char *file, const char *func, int line, const char *format, ...)
 {
    va_list ap;
    char buffer[256];
@@ -11,7 +11,7 @@ __val_finishme(const char *file, int line, const char *format, ...)
    vsnprintf(buffer, sizeof(buffer), format, ap);
    va_end(ap);
 
-   fprintf(stderr, "%s:%d: FINISHME: %s\n", file, line, buffer);
+   fprintf(stderr, "%s(%s:%d): FINISHME: %s\n", func, file, line, buffer);
 }
 
 VkResult

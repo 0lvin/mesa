@@ -688,16 +688,14 @@ VkResult val_QueueSubmit(
 VkResult val_QueueWaitIdle(
 			   VkQueue                                     _queue)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 
 VkResult val_DeviceWaitIdle(
 			    VkDevice                                    _device)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 
@@ -766,20 +764,19 @@ VkResult val_MapMemory(
 		       VkMemoryMapFlags                            flags,
 		       void**                                      ppData)
 {
-   VAL_FROM_HANDLE(val_device_memory, mem, _memory);
-   void *map;
-   if (mem == NULL) {
-      *ppData = NULL;
-      return VK_SUCCESS;
-   }
+	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+	void *map;
+	if (mem == NULL) {
+		*ppData = NULL;
+		return VK_SUCCESS;
+	}
 
-   val_finishme("%s: Not implemented.", __func__);
+	// fake map
+	map = mem->pmem;
 
-   // fake map
-   map = mem->pmem;
+	*ppData = map + offset;
 
-   *ppData = map + offset;
-   return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 void val_UnmapMemory(
@@ -791,7 +788,7 @@ void val_UnmapMemory(
 	if (mem == NULL)
 		return;
 
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 VkResult val_FlushMappedMemoryRanges(
@@ -799,7 +796,7 @@ VkResult val_FlushMappedMemoryRanges(
 				     uint32_t                                    memoryRangeCount,
 				     const VkMappedMemoryRange*                  pMemoryRanges)
 {
-   return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_InvalidateMappedMemoryRanges(
@@ -807,7 +804,7 @@ VkResult val_InvalidateMappedMemoryRanges(
 					  uint32_t                                    memoryRangeCount,
 					  const VkMappedMemoryRange*                  pMemoryRanges)
 {
-   return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 void val_GetBufferMemoryRequirements(
@@ -829,7 +826,7 @@ void val_GetBufferMemoryRequirements(
    pMemoryRequirements->memoryTypeBits = 1;
 
    pMemoryRequirements->size = buffer->size;
-   pMemoryRequirements->alignment = 16;
+   pMemoryRequirements->alignment = MAX2(64, util_cpu_caps.cacheline);
 }
 
 void val_GetImageMemoryRequirements(
@@ -878,7 +875,7 @@ VkResult val_BindBufferMemory(
 								  (char*)mem->pmem + memoryOffset);
 		}
 		if (!buffer->bo) {
-			val_finishme("%s:%d Use failback", __func__, __LINE__);
+			val_finishme("Use failback for create resource.");
 			buffer->bo = device->pscreen->resource_create(device->pscreen,
 								&buffer->template);
 		}
@@ -909,7 +906,7 @@ VkResult val_BindImageMemory(
 								 (char*)mem->pmem + memoryOffset);
 		}
 		if (!image->bo) {
-			val_finishme("%s:%d Use failback", __func__, __LINE__);
+			val_finishme("Use failback for create resource.");
 			image->bo = device->pscreen->resource_create(device->pscreen,
 								&image->template);
 		}
@@ -966,16 +963,14 @@ VkResult val_ResetFences(
     uint32_t                                    fenceCount,
     const VkFence*                              pFences)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_GetFenceStatus(
     VkDevice                                    _device,
     VkFence                                     _fence)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 
@@ -1081,8 +1076,7 @@ VkResult val_WaitForFences(
     VkBool32                                    waitAll,
     uint64_t                                    timeout)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 VkResult val_CreateSemaphore(
@@ -1097,8 +1091,7 @@ VkResult val_CreateSemaphore(
 
    *pSemaphore = (VkSemaphore)1;
 
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 void val_DestroySemaphore(
@@ -1106,7 +1099,7 @@ void val_DestroySemaphore(
     VkSemaphore                                 semaphore,
     const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 
 
@@ -1116,8 +1109,7 @@ VkResult val_CreateEvent(
     const VkAllocationCallbacks*                pAllocator,
     VkEvent*                                    pEvent)
 {
-	val_finishme("%s: Not implemented.", __func__);
-	return VK_SUCCESS;
+	stub_return(VK_SUCCESS);
 }
 
 
@@ -1126,6 +1118,6 @@ void val_DestroyEvent(
     VkEvent                                     _event,
     const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
 

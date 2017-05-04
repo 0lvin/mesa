@@ -130,21 +130,21 @@ VkResult __vk_errorf(VkResult error, const char *file, int line, const char *for
 #define vk_errorf(error, format, ...) error
 #endif
 
-void __val_finishme(const char *file, int line, const char *format, ...)
-   val_printflike(3, 4);
+void __val_finishme(const char *file, const char *func, int line, const char *format, ...)
+   val_printflike(4, 5);
 
 #define val_finishme(format, ...) \
-   __val_finishme(__FILE__, __LINE__, format, ##__VA_ARGS__);
+   __val_finishme(__FILE__, __func__, __LINE__,format, ##__VA_ARGS__);
 
 #define stub_return(v) \
    do { \
-      val_finishme("stub %s", __func__); \
+      val_finishme("Not implemented."); \
       return (v); \
    } while (0)
 
 #define stub() \
    do { \
-      val_finishme("stub %s", __func__); \
+      val_finishme("Not implemented."); \
       return; \
    } while (0)
 

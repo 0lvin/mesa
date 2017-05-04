@@ -654,5 +654,5 @@ void val_CmdPipelineBarrier(
     uint32_t                                    imageMemoryBarrierCount,
     const VkImageMemoryBarrier*                 pImageMemoryBarriers)
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }

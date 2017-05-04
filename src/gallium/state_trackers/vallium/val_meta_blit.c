@@ -34,5 +34,5 @@ void val_CmdBlitImage(
 	VkFilter                                    filter)
 
 {
-	val_finishme("%s: Not implemented.", __func__);
+	stub();
 }
