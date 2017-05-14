@@ -218,15 +218,17 @@ struct val_queue {
 struct val_pipeline_cache {
    struct val_device *                          device;
 };
+
 struct val_device {
    VK_LOADER_DATA                              _loader_data;
 
    VkAllocationCallbacks                       alloc;
 
-   struct val_queue queue;
+   struct val_queue                            queue;
    struct val_instance *                       instance;
-   struct val_physical_device *physical_device;
-   struct pipe_screen *pscreen;
+   struct val_physical_device *                physical_device;
+   struct pipe_screen *                        pscreen;
+   struct pipe_context *                       pctx;
 };
 
 void val_device_get_cache_uuid(void *uuid);

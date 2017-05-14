@@ -5,6 +5,7 @@
 #include "git_sha1.h"
 
 #include "pipe/p_state.h"
+#include "pipe/p_context.h"
 #include "state_tracker/drisw_api.h"
 
 #include "loader/loader.h"
@@ -571,6 +572,9 @@ VkResult val_CreateDevice(
    val_queue_init(device, &device->queue);
 
    device->pscreen = physical_device->pscreen;
+
+   device->pctx = device->pscreen->context_create(device->pscreen,
+                                                  NULL, PIPE_CONTEXT_ROBUST_BUFFER_ACCESS);
 
    *pDevice = val_device_to_handle(device);
 

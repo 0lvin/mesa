@@ -515,6 +515,7 @@ x11_queue_present(struct val_swapchain *val_chain,
 
    xcb_flush(chain->conn);
 
+   memset(image->memory->pmem, 0, chain->extent.width * chain->extent.height *4);
    return VK_SUCCESS;
 }
 
