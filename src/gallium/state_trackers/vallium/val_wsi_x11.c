@@ -32,6 +32,7 @@
 #include "val_wsi.h"
 #include "wsi_common_x11.h"
 
+#include "pipe/p_context.h"
 #include "util/hash_table.h"
 
 struct wsi_x11_connection {
@@ -491,32 +492,60 @@ x11_queue_present(struct val_swapchain *val_chain,
                   struct val_queue *queue,
                   uint32_t image_index)
 {
-   struct x11_swapchain *chain = (struct x11_swapchain *)val_chain;
-   struct x11_image *image = &chain->images[image_index];
+	struct pipe_transfer *bo_t;
+	struct x11_swapchain *chain = (struct x11_swapchain *)val_chain;
+	struct x11_image *image = &chain->images[image_index];
 
-   assert(image_index < chain->image_count);
+	assert(image_index < chain->image_count);
 
-   xcb_void_cookie_t cookie;
+	xcb_void_cookie_t cookie;
 
-   fprintf(stderr, "chain is %p\n", chain);
-   cookie = xcb_put_image(chain->conn, XCB_IMAGE_FORMAT_Z_PIXMAP,
-                          chain->window,
-                          chain->gc,
-                          chain->extent.width,
-                          chain->extent.height,
-                          0, 0, 0, 24,
-                          chain->extent.width * chain->extent.height *4,
-                          image->memory->pmem);
+	struct pipe_box box;
 
-   xcb_discard_reply(chain->conn, cookie.sequence);
+	fprintf(stderr, "chain is %p by map\n", chain);
 
-   image->geom_cookie = xcb_get_geometry(chain->conn, chain->window);
-   image->busy = true;
+	if (!image->image->bo) {
+		fprintf(stderr, "No image\n");
+		stub_return(VK_SUCCESS);
+	}
 
-   xcb_flush(chain->conn);
+	box.x = 0;
+	box.y = 0;
+	box.z = 0;
 
-   memset(image->memory->pmem, 0, chain->extent.width * chain->extent.height *4);
-   return VK_SUCCESS;
+	box.width = image->image->bo->width0;
+	box.height = image->image->bo->height0;
+	box.depth = image->image->bo->depth0;
+
+	void * pmem = val_chain->device->pctx->transfer_map(val_chain->device->pctx,
+					    image->image->bo,
+					    0,
+					    PIPE_TRANSFER_READ,
+					    &box,
+					    &bo_t);
+
+	cookie = xcb_put_image(chain->conn, XCB_IMAGE_FORMAT_Z_PIXMAP,
+			      chain->window,
+			      chain->gc,
+			      chain->extent.width,
+			      chain->extent.height,
+			      0, 0, 0, 24,
+			      chain->extent.width * chain->extent.height *4,
+			      pmem);
+
+	xcb_discard_reply(chain->conn, cookie.sequence);
+
+	image->geom_cookie = xcb_get_geometry(chain->conn, chain->window);
+
+	image->busy = true;
+
+	xcb_flush(chain->conn);
+
+	memset(image->memory->pmem, 0, chain->extent.width * chain->extent.height * 4);
+
+	val_chain->device->pctx->transfer_unmap(val_chain->device->pctx, bo_t);
+
+	stub_return(VK_SUCCESS);
 }
 
 static VkResult
