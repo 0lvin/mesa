@@ -65,6 +65,41 @@ static const VkExtensionProperties device_extensions[] = {
       .specVersion = 67,
    },
 };
+
+void
+val_mmap(struct val_device_memory *mem, struct val_device *device)
+{
+	if (mem->bo) {
+		mem->box.x = 0;
+		mem->box.y = 0;
+		mem->box.z = 0;
+
+		mem->box.width = mem->bo->width0;
+		mem->box.height = mem->bo->height0;
+		mem->box.depth = mem->bo->depth0;
+
+		mem->map = device->pctx->transfer_map(device->pctx,
+					    mem->bo,
+					    0,
+					    PIPE_TRANSFER_READ | PIPE_TRANSFER_WRITE,
+					    &mem->box,
+					    &mem->bo_t);
+	} else {
+		unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
+		mem->map = align_malloc(mem->map_size, allocate_align);
+	}
+}
+
+void
+val_munmap(struct val_device_memory *mem, struct val_device *device)
+{
+	if (mem->bo) {
+		device->pctx->transfer_unmap(device->pctx, mem->bo_t);
+	} else {
+		align_free(mem->map);
+	}
+}
+
 static void *
 default_alloc_func(void *pUserData, size_t size, size_t align,
                    VkSystemAllocationScope allocationScope)
@@ -733,6 +768,9 @@ VkResult val_AllocateMemory(
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 	}
 
+	mem->bo = NULL;
+	mem->map = NULL;
+
 	mem->map_size = alloc_size;
 
 	mem->type_index = pAllocateInfo->memoryTypeIndex;
@@ -886,9 +924,11 @@ VkResult val_BindBufferMemory(
 		if (!buffer->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
 		}
+		mem->bo = buffer->bo;
 	} else {
 		device->pscreen->resource_destroy(device->pscreen, buffer->bo);
 		buffer->bo = NULL;
+		mem->bo = NULL;
 	}
 	return VK_SUCCESS;
 }
@@ -917,6 +957,7 @@ VkResult val_BindImageMemory(
 		if (!image->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
 		}
+		mem->bo = image->bo;
 	} else {
 		device->pscreen->resource_destroy(device->pscreen, image->bo);
 		image->bo = NULL;

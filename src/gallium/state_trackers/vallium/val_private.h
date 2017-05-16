@@ -138,7 +138,7 @@ void __val_finishme(const char *file, const char *func, int line, const char *fo
 
 #define stub_return(v) \
    do { \
-      val_finishme("Not implemented."); \
+      val_finishme("Not implemented. Return %d", v); \
       return (v); \
    } while (0)
 
@@ -218,27 +218,32 @@ struct val_queue {
 struct val_pipeline_cache {
    struct val_device *                          device;
 };
-
 struct val_device {
-   VK_LOADER_DATA                              _loader_data;
+    VK_LOADER_DATA                              _loader_data;
 
-   VkAllocationCallbacks                       alloc;
+    VkAllocationCallbacks                       alloc;
 
-   struct val_queue                            queue;
-   struct val_instance *                       instance;
-   struct val_physical_device *                physical_device;
-   struct pipe_screen *                        pscreen;
-   struct pipe_context *                       pctx;
+    struct val_queue queue;
+    struct val_instance *                       instance;
+    struct val_physical_device 	*physical_device;
+    struct pipe_screen		*pscreen;
+    struct pipe_context		*pctx;
 };
 
 void val_device_get_cache_uuid(void *uuid);
 
 struct val_device_memory {
-   struct pipe_memory_allocation *pmem;
-   uint32_t                                     type_index;
-   VkDeviceSize                                 map_size;
-   void *                                       map;
+	struct pipe_memory_allocation	*pmem;
+	uint32_t					type_index;
+	VkDeviceSize				map_size;
+	void						*map;
+	struct pipe_resource		*bo;
+	struct pipe_transfer		*bo_t;
+	struct pipe_box box;
 };
+
+void val_munmap(struct val_device_memory *mem, struct val_device *device);
+void val_mmap(struct val_device_memory *mem, struct val_device *device);
 
 struct val_image {
 	VkImageType type;
