@@ -70,6 +70,9 @@ void
 val_mmap(struct val_device_memory *mem, struct val_device *device)
 {
 	if (mem->bo) {
+
+		assert(mem->bo->last_level == 0);
+
 		mem->box.x = 0;
 		mem->box.y = 0;
 		mem->box.z = 0;
@@ -85,8 +88,8 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					    &mem->box,
 					    &mem->bo_t);
 	} else {
-		unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
-		mem->map = align_malloc(mem->map_size, allocate_align);
+		// reuse already allocated memory
+		mem->map = mem->pmem;
 	}
 }
 
@@ -95,9 +98,8 @@ val_munmap(struct val_device_memory *mem, struct val_device *device)
 {
 	if (mem->bo) {
 		device->pctx->transfer_unmap(device->pctx, mem->bo_t);
-	} else {
-		align_free(mem->map);
 	}
+	mem->map = NULL;
 }
 
 static void *
