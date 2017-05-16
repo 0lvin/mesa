@@ -69,6 +69,12 @@ static const VkExtensionProperties device_extensions[] = {
 void
 val_mmap(struct val_device_memory *mem, struct val_device *device)
 {
+	val_finishme("Premapped %p ~ %p ~ %p", mem->map, mem->pmem, mem->bo);
+
+	//already mapped
+	if (mem->map)
+		return;
+
 	if (mem->bo) {
 
 		assert(mem->bo->last_level == 0);
@@ -91,6 +97,7 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 		// reuse already allocated memory
 		mem->map = mem->pmem;
 	}
+	val_finishme("Mapped %p ~ %p", mem->map, mem->pmem);
 }
 
 void
@@ -698,11 +705,11 @@ void val_GetDeviceQueue(
 			uint32_t                                    queueIndex,
 			VkQueue*                                    pQueue)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
+	VAL_FROM_HANDLE(val_device, device, _device);
 
-   assert(queueIndex == 0);
+	assert(queueIndex == 0);
 
-   *pQueue = val_queue_to_handle(&device->queue);
+	*pQueue = val_queue_to_handle(&device->queue);
 }
 
 
@@ -809,16 +816,16 @@ VkResult val_MapMemory(
 		       void**                                      ppData)
 {
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
-	void *map;
+	VAL_FROM_HANDLE(val_device, device, _device);
+
 	if (mem == NULL) {
 		*ppData = NULL;
 		return VK_SUCCESS;
 	}
 
-	// fake map
-	map = mem->pmem;
+	val_mmap(mem, device);
 
-	*ppData = map + offset;
+	*ppData = (char*)mem->map + offset;
 
 	stub_return(VK_SUCCESS);
 }
@@ -828,10 +835,12 @@ void val_UnmapMemory(
 		     VkDeviceMemory                              _memory)
 {
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
+	VAL_FROM_HANDLE(val_device, device, _device);
 
 	if (mem == NULL)
 		return;
 
+	val_munmap(mem, device);
 	stub();
 }
 
