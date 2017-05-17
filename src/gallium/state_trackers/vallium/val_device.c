@@ -12,6 +12,7 @@
 
 #include "util/u_memory.h"
 #include "util/u_cpu_detect.h"
+#include "util/u_box.h"
 
 static VkResult
 val_physical_device_init(struct val_physical_device *device,
@@ -69,7 +70,7 @@ static const VkExtensionProperties device_extensions[] = {
 void
 val_mmap(struct val_device_memory *mem, struct val_device *device)
 {
-	val_finishme("Premapped %p ~ %p ~ %p", mem->map, mem->pmem, mem->bo);
+	val_finishme("Premapped(%p) %p ~ %p ~ %p", mem, mem->map, mem->pmem, mem->bo);
 
 	//already mapped
 	if (mem->map)
@@ -79,13 +80,14 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 
 		assert(mem->bo->last_level == 0);
 
-		mem->box.x = 0;
-		mem->box.y = 0;
-		mem->box.z = 0;
-
-		mem->box.width = mem->bo->width0;
-		mem->box.height = mem->bo->height0;
-		mem->box.depth = mem->bo->depth0;
+		if (mem->bo->target == PIPE_BUFFER)
+			u_box_1d(0,
+					 mem->bo->width0,
+					 &mem->box);
+		else
+			u_box_3d(0, 0, 0,
+					 mem->bo->width0, mem->bo->height0, mem->bo->depth0,
+					 &mem->box);
 
 		mem->map = device->pctx->transfer_map(device->pctx,
 					    mem->bo,
@@ -825,6 +827,9 @@ VkResult val_MapMemory(
 
 	val_mmap(mem, device);
 
+	if (!mem->map)
+		return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+
 	*ppData = (char*)mem->map + offset;
 
 	stub_return(VK_SUCCESS);
@@ -840,6 +845,7 @@ void val_UnmapMemory(
 	if (mem == NULL)
 		return;
 
+	memset(mem->map, 128, mem->box.width * mem->box.height * mem->box.depth);
 	val_munmap(mem, device);
 	stub();
 }
@@ -922,6 +928,7 @@ VkResult val_BindBufferMemory(
 	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
 	if (mem) {
+		val_finishme("Offset %p[%ld]", mem->pmem, memoryOffset);
 		if (device->pscreen->resource_from_user_memory) {
 			buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
 								  &buffer->template,
@@ -955,16 +962,8 @@ VkResult val_BindImageMemory(
 	VAL_FROM_HANDLE(val_image, image, _image);
 
 	if (mem) {
-		if (device->pscreen->resource_from_user_memory) {
-			image->bo = device->pscreen->resource_from_user_memory(device->pscreen,
-								 &image->template,
-								 (char*)mem->pmem + memoryOffset);
-		}
-		if (!image->bo) {
-			val_finishme("Use failback for create resource.");
-			image->bo = device->pscreen->resource_create(device->pscreen,
+		image->bo = device->pscreen->resource_create(device->pscreen,
 								&image->template);
-		}
 		if (!image->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
 		}

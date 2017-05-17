@@ -636,6 +636,8 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
                                            &box,
                                            &src_t);
 
+      val_finishme("Copy mapped from %p ~ %p", src_data, copycmd->src->bo);
+
       dbox.x = 0;
       dbox.y = 0;
       dbox.z = 0;
@@ -648,6 +650,8 @@ static VkResult handle_copy_image_to_buffer(struct val_cmd_buffer_entry *cmd,
                                            PIPE_TRANSFER_WRITE,
                                            &dbox,
                                            &dst_t);
+
+      val_finishme("Copy mapped to %p ~ %p", dst_data, copycmd->dst->bo);
 
       util_copy_rect(dst_data, copycmd->src->bo->format,
                      copycmd->regions[i].bufferRowLength,
