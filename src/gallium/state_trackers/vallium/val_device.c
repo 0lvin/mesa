@@ -1059,6 +1059,7 @@ VkResult val_CreateBuffer(
       buffer->template.width0 = buffer->size;
       buffer->template.height0 = 1;
       buffer->template.depth0 = 1;
+      buffer->template.array_size = 1;
 
       buffer->bo = NULL;
       buffer->total_size = val_texture_size(&buffer->template);
