@@ -1,8 +1,8 @@
 /**************************************************************************
- *
+ * 
  * Copyright 2006 VMware, Inc.
  * All Rights Reserved.
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -10,11 +10,11 @@
  * distribute, sub license, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice (including the
  * next paragraph) shall be included in all copies or substantial portions
  * of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
  * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
@@ -22,7 +22,7 @@
  * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
+ * 
  **************************************************************************/
  /*
   * Authors:
@@ -137,7 +137,7 @@ softpipe_displaytarget_layout(struct pipe_screen *screen,
    spr->dt = winsys->displaytarget_create(winsys,
                                           spr->base.bind,
                                           spr->base.format,
-                                          spr->base.width0,
+                                          spr->base.width0, 
                                           spr->base.height0,
                                           64,
                                           map_front_private,
@@ -151,10 +151,9 @@ softpipe_displaytarget_layout(struct pipe_screen *screen,
  * Create new pipe_resource given the template information.
  */
 static struct pipe_resource *
-softpipe_resource_create_all(struct pipe_screen *screen,
-			     const struct pipe_resource *templat,
-			     const void *map_front_private,
-			     bool alloc_backing)
+softpipe_resource_create_front(struct pipe_screen *screen,
+                               const struct pipe_resource *templat,
+                               const void *map_front_private)
 {
    struct softpipe_resource *spr = CALLOC_STRUCT(softpipe_resource);
    if (!spr)
@@ -177,10 +176,10 @@ softpipe_resource_create_all(struct pipe_screen *screen,
          goto fail;
    }
    else {
-      if (!softpipe_resource_layout(screen, spr, alloc_backing))
+      if (!softpipe_resource_layout(screen, spr, TRUE))
          goto fail;
    }
-
+    
    return &spr->base;
 
  fail:
@@ -189,34 +188,10 @@ softpipe_resource_create_all(struct pipe_screen *screen,
 }
 
 static struct pipe_resource *
-softpipe_resource_create_front(struct pipe_screen *screen,
-                               const struct pipe_resource *templat,
-                               const void *map_front_private)
-{
-  return softpipe_resource_create_all(screen, templat, map_front_private, true);
-}
-
-static struct pipe_resource *
-softpipe_buffer_from_user_memory(struct pipe_screen *screen,
-			     const struct pipe_resource *templ,
-			     void *user_memory)
-{
-   struct pipe_resource *pt;
-   struct softpipe_resource *spr;
-   pt = softpipe_resource_create_all(screen, templ, NULL, false);
-   if (!pt)
-      return pt;
-   spr = softpipe_resource(pt);
-   spr->userBuffer = TRUE;
-   spr->data = (char *)user_memory;
-   return pt;
-}
-
-static struct pipe_resource *
 softpipe_resource_create(struct pipe_screen *screen,
                          const struct pipe_resource *templat)
 {
-  return softpipe_resource_create_front(screen, templat, NULL);
+   return softpipe_resource_create_front(screen, templat, NULL);
 }
 
 static void
@@ -352,7 +327,7 @@ softpipe_create_surface(struct pipe_context *pipe,
 /**
  * Free a pipe_surface which was created with softpipe_create_surface().
  */
-static void
+static void 
 softpipe_surface_destroy(struct pipe_context *pipe,
                          struct pipe_surface *surf)
 {
@@ -557,5 +532,4 @@ softpipe_init_screen_texture_funcs(struct pipe_screen *screen)
    screen->resource_from_handle = softpipe_resource_from_handle;
    screen->resource_get_handle = softpipe_resource_get_handle;
    screen->can_create_resource = softpipe_can_create_resource;
-   screen->resource_from_user_memory = softpipe_buffer_from_user_memory;
 }

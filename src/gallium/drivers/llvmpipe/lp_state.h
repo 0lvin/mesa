@@ -1,5 +1,5 @@
 /**************************************************************************
- *
+ * 
  * Copyright 2007 VMware, Inc.
  * All Rights Reserved.
  *
@@ -10,11 +10,11 @@
  * distribute, sub license, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice (including the
  * next paragraph) shall be included in all copies or substantial portions
  * of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
  * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
@@ -22,7 +22,7 @@
  * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
+ * 
  **************************************************************************/
 
 /* Authors:  Keith Whitwell <keithw@vmware.com>
@@ -82,13 +82,6 @@ struct lp_so_state {
    struct pipe_stream_output_info base;
 };
 
-/** Subclass of pipe_compute_state */
-struct lp_compute_shader {
-   struct pipe_compute_state shader;
-   struct tgsi_token *tokens;
-   struct tgsi_shader_info info;
-   int max_sampler;             /* -1 if no samplers */
-};
 
 void
 llvmpipe_set_framebuffer_state(struct pipe_context *,
@@ -97,7 +90,7 @@ llvmpipe_set_framebuffer_state(struct pipe_context *,
 void
 llvmpipe_update_fs(struct llvmpipe_context *lp);
 
-void
+void 
 llvmpipe_update_setup(struct llvmpipe_context *lp);
 
 void
@@ -126,9 +119,6 @@ llvmpipe_init_vs_funcs(struct llvmpipe_context *llvmpipe);
 
 void
 llvmpipe_init_gs_funcs(struct llvmpipe_context *llvmpipe);
-
-void
-llvmpipe_init_compute_funcs(struct llvmpipe_context *llvmpipe);
 
 void
 llvmpipe_init_rasterizer_funcs(struct llvmpipe_context *llvmpipe);

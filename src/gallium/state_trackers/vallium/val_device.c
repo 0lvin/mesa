@@ -978,7 +978,7 @@ VkResult val_BindBufferMemory(
 	if (mem) {
 		val_finishme("%p: Offset %p[%ld] ~ %lu", mem, mem->pmem, memoryOffset, mem->map_size);
 		if (mem->bo) {
-			val_finishme("We already have some allocated memmory: %p", mem->bo);
+			val_finishme("We already have some allocated memmory: %p, offset %lu ignored", mem->bo, memoryOffset);
 			buffer->bo = mem->bo;
 		}
 		if (!buffer->bo) {
