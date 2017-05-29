@@ -76,6 +76,11 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 	if (mem->map)
 		return;
 
+	if (!mem->bo) {
+		mem->bo = device->pscreen->resource_create(device->pscreen,
+							  &mem->template);
+		val_finishme("Asked about map before create image/buffer, create without user memmory %p", mem->bo);
+	}
 	if (mem->bo) {
 
 		assert(mem->bo->last_level == 0);
@@ -89,23 +94,47 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					 mem->bo->width0, mem->bo->height0, mem->bo->depth0,
 					 &mem->box);
 
+		val_finishme("Map type %d %d * %d * %d \n", mem->bo->target,
+		              mem->box.width, mem->box.height, mem->box.depth);
+
+
 		mem->map = device->pctx->transfer_map(device->pctx,
 					    mem->bo,
 					    0,
 					    PIPE_TRANSFER_READ | PIPE_TRANSFER_WRITE,
 					    &mem->box,
 					    &mem->bo_t);
+
+		if (mem->bo->target == PIPE_BUFFER)
+			for(int i = 0; i < mem->bo->width0; i ++) {
+				printf(" 0x%2x",  ((char*)mem->map)[i] & 0xff);
+				if (i % 16 == 15)
+					printf("\n");
+			}
 	} else {
+		u_box_1d(0,
+				 mem->map_size,
+				 &mem->box);
+
+		val_finishme("Map type 'NoBo' %d * %d * %d",
+		             mem->box.width, mem->box.height, mem->box.depth);
+
 		// reuse already allocated memory
 		mem->map = mem->pmem;
 	}
-	val_finishme("Mapped %p ~ %p", mem->map, mem->pmem);
+	val_finishme("Mapped %p ~ %p ~ %d", mem->map, mem->pmem, mem->box.width * mem->box.height * mem->box.depth);
 }
 
 void
 val_munmap(struct val_device_memory *mem, struct val_device *device)
 {
 	if (mem->bo) {
+		if (mem->bo->target == PIPE_BUFFER)
+			for(int i = 0; i < mem->bo->width0; i ++) {
+				printf(" 0x%2x",  ((char*)mem->map)[i] & 0xff);
+				if (i % 16 == 15)
+					printf("\n");
+			}
 		device->pctx->transfer_unmap(device->pctx, mem->bo_t);
 	}
 	mem->map = NULL;
@@ -358,7 +387,7 @@ void
 val_device_get_cache_uuid(void *uuid)
 {
    memset(uuid, 0, VK_UUID_SIZE);
-   snprintf(uuid, VK_UUID_SIZE, "anv-%s", MESA_GIT_SHA1 + 4);
+   snprintf(uuid, VK_UUID_SIZE, "val-%s", MESA_GIT_SHA1 + 4);
 }
 
 void val_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
@@ -755,6 +784,8 @@ VkResult val_AllocateMemory(
 			    const VkAllocationCallbacks*                pAllocator,
 			    VkDeviceMemory*                             pMem)
 {
+	val_finishme("Enter dev=%p", _device);
+
 	VAL_FROM_HANDLE(val_device, device, _device);
 	struct val_device_memory *mem;
 	unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
@@ -784,9 +815,14 @@ VkResult val_AllocateMemory(
 
 	mem->map_size = alloc_size;
 
+	val_buffer_template(device, &mem->template,
+						mem->map_size);
+
 	mem->type_index = pAllocateInfo->memoryTypeIndex;
 
 	*pMem = val_device_memory_to_handle(mem);
+
+	val_finishme("Leave dev=%p/mem=%p[%lu]", _device, mem, mem->map_size);
 
 	return VK_SUCCESS;
 }
@@ -796,11 +832,16 @@ void val_FreeMemory(
 		    VkDeviceMemory                              _mem,
 		    const VkAllocationCallbacks*                pAllocator)
 {
+	val_finishme("Enter dev=%p/mem=%p", _device, _mem);
+
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _mem);
 
 	if (mem == NULL)
 		return;
+
+	if (mem->bo)
+		device->pscreen->resource_destroy(device->pscreen, mem->bo);
 
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
@@ -817,6 +858,8 @@ VkResult val_MapMemory(
 		       VkMemoryMapFlags                            flags,
 		       void**                                      ppData)
 {
+	val_finishme("Enter dev=%p/mem=%p/offset=%lu/size=%lu", _device, _memory, offset, size);
+
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_device, device, _device);
 
@@ -839,13 +882,16 @@ void val_UnmapMemory(
 		     VkDevice                                    _device,
 		     VkDeviceMemory                              _memory)
 {
+	val_finishme("Enter dev=%p/mem=%p", _device, _memory);
+
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_device, device, _device);
 
 	if (mem == NULL)
 		return;
 
-	memset(mem->map, 128, mem->box.width * mem->box.height * mem->box.depth);
+	fprintf(stderr, "Size: %d\n", mem->box.width * mem->box.height * mem->box.depth);
+
 	val_munmap(mem, device);
 	stub();
 }
@@ -923,16 +969,17 @@ VkResult val_BindBufferMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
+	val_finishme("Enter dev=%p/buf=%p/mem=%p", _device, _buffer, _memory);
+
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
 	if (mem) {
-		val_finishme("Offset %p[%ld]", mem->pmem, memoryOffset);
-		if (device->pscreen->resource_from_user_memory) {
-			buffer->bo = device->pscreen->resource_from_user_memory(device->pscreen,
-								  &buffer->template,
-								  (char*)mem->pmem + memoryOffset);
+		val_finishme("%p: Offset %p[%ld] ~ %lu", mem, mem->pmem, memoryOffset, mem->map_size);
+		if (mem->bo) {
+			val_finishme("We already have some allocated memmory: %p", mem->bo);
+			buffer->bo = mem->bo;
 		}
 		if (!buffer->bo) {
 			val_finishme("Use failback for create resource.");
@@ -944,9 +991,7 @@ VkResult val_BindBufferMemory(
 		}
 		mem->bo = buffer->bo;
 	} else {
-		device->pscreen->resource_destroy(device->pscreen, buffer->bo);
 		buffer->bo = NULL;
-		mem->bo = NULL;
 	}
 	return VK_SUCCESS;
 }
@@ -957,19 +1002,27 @@ VkResult val_BindImageMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
+	val_finishme("Enter dev=%p/image=%p/mem=%p", _device, _image, _memory);
+
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_image, image, _image);
 
 	if (mem) {
-		image->bo = device->pscreen->resource_create(device->pscreen,
-								&image->template);
+		val_finishme("Offset %p[%ld]", mem->pmem, memoryOffset);
+		if (mem->bo) {
+			val_finishme("We already have some allocated memmory: %p", mem->bo);
+			image->bo = mem->bo;
+		}
+		if (!image->bo) {
+			image->bo = device->pscreen->resource_create(device->pscreen,
+							    &image->template);
+		}
 		if (!image->bo) {
 			return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
 		}
 		mem->bo = image->bo;
 	} else {
-		device->pscreen->resource_destroy(device->pscreen, image->bo);
 		image->bo = NULL;
 	}
 	return VK_SUCCESS;
@@ -1029,44 +1082,51 @@ VkResult val_GetFenceStatus(
 }
 
 
-// Buffer functions
+void
+val_buffer_template(struct val_device* device, struct pipe_resource *template, VkDeviceSize size)
+{
+	memset(template, 0, sizeof(*template));
+	template->screen = device->pscreen;
+	template->target = PIPE_BUFFER;
+	template->format = PIPE_FORMAT_R8_UNORM;
+	template->width0 = size;
+	template->height0 = 1;
+	template->depth0 = 1;
+	template->array_size = 1;
+}
 
+// Buffer functions
 VkResult val_CreateBuffer(
     VkDevice                                    _device,
     const VkBufferCreateInfo*                   pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
     VkBuffer*                                   pBuffer)
 {
-   VAL_FROM_HANDLE(val_device, device, _device);
-   struct val_buffer *buffer;
+	val_finishme("Enter dev=%p", _device);
 
-   assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+	VAL_FROM_HANDLE(val_device, device, _device);
+	struct val_buffer *buffer;
 
-   buffer = vk_alloc2(&device->alloc, pAllocator, sizeof(*buffer), 8,
-                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (buffer == NULL)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+	assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
 
-   buffer->size = pCreateInfo->size;
-   buffer->usage = pCreateInfo->usage;
-   buffer->offset = 0;
+	buffer = vk_alloc2(&device->alloc, pAllocator, sizeof(*buffer), 8,
+					   VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (buffer == NULL)
+		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   {
-      memset(&buffer->template, 0, sizeof(buffer->template));
-      buffer->template.screen = device->pscreen;
-      buffer->template.target = PIPE_BUFFER;
-      buffer->template.format = PIPE_FORMAT_R8_UNORM;
-      buffer->template.width0 = buffer->size;
-      buffer->template.height0 = 1;
-      buffer->template.depth0 = 1;
-      buffer->template.array_size = 1;
+	buffer->size = pCreateInfo->size;
+	buffer->usage = pCreateInfo->usage;
+	buffer->offset = 0;
 
-      buffer->bo = NULL;
-      buffer->total_size = val_texture_size(&buffer->template);
-   }
-   *pBuffer = val_buffer_to_handle(buffer);
+	buffer->bo = NULL;
+	val_buffer_template(device, &buffer->template,
+						buffer->size);
+	buffer->total_size = val_texture_size(&buffer->template);
+	*pBuffer = val_buffer_to_handle(buffer);
 
-   return VK_SUCCESS;
+	val_finishme("Leave dev=%p/buffer=%p[%lu]", _device, buffer, buffer->size);
+
+	return VK_SUCCESS;
 }
 
 void val_DestroyBuffer(

@@ -237,9 +237,13 @@ struct val_device_memory {
 	uint32_t					type_index;
 	VkDeviceSize				map_size;
 	void						*map;
+
+	// template for resource_from_user_memory
+	struct pipe_resource		template;
+
 	struct pipe_resource		*bo;
 	struct pipe_transfer		*bo_t;
-	struct pipe_box box;
+	struct pipe_box				box;
 };
 
 void val_munmap(struct val_device_memory *mem, struct val_device *device);
@@ -271,6 +275,9 @@ val_image_create(VkDevice _device,
                  VkImage *pImage);
 uint64_t
 val_texture_size(struct pipe_resource *pt);
+
+void
+val_buffer_template(struct val_device* device, struct pipe_resource *template, VkDeviceSize size);
 
 struct val_image_view {
    const struct val_image *image; /**< VkImageViewCreateInfo::image */
