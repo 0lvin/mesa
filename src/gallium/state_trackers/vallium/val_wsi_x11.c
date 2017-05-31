@@ -32,6 +32,7 @@
 #include "val_wsi.h"
 #include "wsi_common_x11.h"
 
+#include "util/u_format.h"
 #include "util/hash_table.h"
 
 struct wsi_x11_connection {
@@ -507,13 +508,17 @@ x11_queue_present(struct val_swapchain *val_chain,
 
 	val_mmap(image->memory, val_chain->device);
 
+	if (!image->memory->map)
+		return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
+
 	cookie = xcb_put_image(chain->conn, XCB_IMAGE_FORMAT_Z_PIXMAP,
 			      chain->window,
 			      chain->gc,
 			      chain->extent.width,
 			      chain->extent.height,
 			      0, 0, 0, 24,
-			      chain->extent.width * chain->extent.height *4,
+			      chain->extent.width * chain->extent.height *
+			      util_format_get_blocksize(image->memory->bo->format),
 			      image->memory->map);
 
 	xcb_discard_reply(chain->conn, cookie.sequence);
@@ -524,7 +529,9 @@ x11_queue_present(struct val_swapchain *val_chain,
 
 	xcb_flush(chain->conn);
 
-	memset(image->memory->map, 0, chain->extent.width * chain->extent.height * 4);
+	memset(image->memory->map, 0,
+	       chain->extent.width * chain->extent.height *
+	       util_format_get_blocksize(image->memory->bo->format));
 
 	val_munmap(image->memory, val_chain->device);
 

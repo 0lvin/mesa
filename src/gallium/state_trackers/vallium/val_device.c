@@ -70,17 +70,12 @@ static const VkExtensionProperties device_extensions[] = {
 void
 val_mmap(struct val_device_memory *mem, struct val_device *device)
 {
-	val_finishme("Premapped(%p) %p ~ %p ~ %p", mem, mem->map, mem->pmem, mem->bo);
+	val_finishme("Premapped(%p) %p ~ %p", mem, mem->map, mem->bo);
 
 	//already mapped
 	if (mem->map)
 		return;
 
-	if (!mem->bo) {
-		mem->bo = device->pscreen->resource_create(device->pscreen,
-							  &mem->template);
-		val_finishme("Asked about map before create image/buffer, create without user memmory %p", mem->bo);
-	}
 	if (mem->bo) {
 
 		assert(mem->bo->last_level == 0);
@@ -104,37 +99,14 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					    PIPE_TRANSFER_READ | PIPE_TRANSFER_WRITE,
 					    &mem->box,
 					    &mem->bo_t);
-
-		if (mem->bo->target == PIPE_BUFFER)
-			for(int i = 0; i < mem->bo->width0; i ++) {
-				printf(" 0x%2x",  ((char*)mem->map)[i] & 0xff);
-				if (i % 16 == 15)
-					printf("\n");
-			}
-	} else {
-		u_box_1d(0,
-				 mem->map_size,
-				 &mem->box);
-
-		val_finishme("Map type 'NoBo' %d * %d * %d",
-		             mem->box.width, mem->box.height, mem->box.depth);
-
-		// reuse already allocated memory
-		mem->map = mem->pmem;
 	}
-	val_finishme("Mapped %p ~ %p ~ %d", mem->map, mem->pmem, mem->box.width * mem->box.height * mem->box.depth);
+	val_finishme("Mapped %p ~ %d", mem->map, mem->box.width * mem->box.height * mem->box.depth);
 }
 
 void
 val_munmap(struct val_device_memory *mem, struct val_device *device)
 {
 	if (mem->bo) {
-		if (mem->bo->target == PIPE_BUFFER)
-			for(int i = 0; i < mem->bo->width0; i ++) {
-				printf(" 0x%2x",  ((char*)mem->map)[i] & 0xff);
-				if (i % 16 == 15)
-					printf("\n");
-			}
 		device->pctx->transfer_unmap(device->pctx, mem->bo_t);
 	}
 	mem->map = NULL;
@@ -296,7 +268,7 @@ VkResult val_EnumeratePhysicalDevices(
 			if (fd >= 0) break;
 		}
 
-		if (fd >= 0 && pipe_loader_drm_probe_fd(&instance->devs, fd)) {
+		if (fd >= 0 && pipe_loader_drm_probe_fd(&instance->devs, fd) && 0) {
 			fprintf(stderr, "use real device %s.\n", instance->devs[0].driver_name);
 			result = val_physical_device_init(&instance->physicalDevice,
 							instance, &instance->devs[0]);
@@ -788,7 +760,6 @@ VkResult val_AllocateMemory(
 
 	VAL_FROM_HANDLE(val_device, device, _device);
 	struct val_device_memory *mem;
-	unsigned allocate_align = MAX2(64, util_cpu_caps.cacheline);
 
 	assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
 
@@ -804,11 +775,6 @@ VkResult val_AllocateMemory(
 		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
 	uint64_t alloc_size = align_u64(pAllocateInfo->allocationSize, 4096);
-	mem->pmem = align_malloc(alloc_size, allocate_align);
-	if (!mem->pmem) {
-		vk_free2(&device->alloc, pAllocator, mem);
-		return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
-	}
 
 	mem->bo = NULL;
 	mem->map = NULL;
@@ -846,7 +812,6 @@ void val_FreeMemory(
 //   if (mem->bo.map)
 //      val_gem_munmap(mem->bo.map, mem->bo.size);
 
-	align_free(mem->pmem);
 	vk_free2(&device->alloc, pAllocator, mem);
 }
 
@@ -866,6 +831,11 @@ VkResult val_MapMemory(
 	if (mem == NULL) {
 		*ppData = NULL;
 		return VK_SUCCESS;
+	}
+
+	if (!mem->bo) {
+		mem->bo = device->pscreen->resource_create(device->pscreen, &mem->template);
+		val_finishme("Asked about map before create image/buffer, create without user memmory %p", mem->bo);
 	}
 
 	val_mmap(mem, device);
@@ -943,7 +913,7 @@ void val_GetImageMemoryRequirements(
    pMemoryRequirements->memoryTypeBits = 1;
 
    pMemoryRequirements->size = image->size;
-   pMemoryRequirements->alignment = image->alignment;
+   pMemoryRequirements->alignment = MAX2(64, util_cpu_caps.cacheline);
 }
 
 void val_GetImageSparseMemoryRequirements(
@@ -976,7 +946,7 @@ VkResult val_BindBufferMemory(
 	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
 	if (mem) {
-		val_finishme("%p: Offset %p[%ld] ~ %lu", mem, mem->pmem, memoryOffset, mem->map_size);
+		val_finishme("%p: Offset %p[%ld] ~ %lu", mem, mem->bo, memoryOffset, mem->map_size);
 		if (mem->bo) {
 			val_finishme("We already have some allocated memmory: %p, offset %lu ignored", mem->bo, memoryOffset);
 			buffer->bo = mem->bo;
@@ -1009,7 +979,7 @@ VkResult val_BindImageMemory(
 	VAL_FROM_HANDLE(val_image, image, _image);
 
 	if (mem) {
-		val_finishme("Offset %p[%ld]", mem->pmem, memoryOffset);
+		val_finishme("Offset %p[%ld]", mem->bo, memoryOffset);
 		if (mem->bo) {
 			val_finishme("We already have some allocated memmory: %p", mem->bo);
 			image->bo = mem->bo;

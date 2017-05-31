@@ -233,7 +233,6 @@ struct val_device {
 void val_device_get_cache_uuid(void *uuid);
 
 struct val_device_memory {
-	void						*pmem;
 	uint32_t					type_index;
 	VkDeviceSize				map_size;
 	void						*map;
