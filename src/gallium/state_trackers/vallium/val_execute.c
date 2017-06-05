@@ -836,7 +836,11 @@ VkResult val_execute_cmds(struct val_device *device,
    state.pctx->bind_vertex_elements_state(state.pctx, NULL);
    state.pctx->bind_vs_state(state.pctx, NULL);
    state.pctx->bind_fs_state(state.pctx, NULL);
-   state.pctx->bind_compute_state(state.pctx, NULL);
+   if (state.pctx->bind_compute_state) {
+      state.pctx->bind_compute_state(state.pctx, NULL);
+   } else {
+       fprintf(stderr, "Compute shaders is not supported.\n");
+   }
    if (state.velems_cso)
       state.pctx->delete_vertex_elements_state(state.pctx, state.velems_cso);
    if (state.shader_cso[PIPE_SHADER_VERTEX])
