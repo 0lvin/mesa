@@ -36,7 +36,6 @@ entrypoints = []
 # function and a power-of-two size table. The prime numbers are determined
 # experimentally.
 
-prefix = "val"
 none = 0xffff
 hash_size = 256
 u32_mask = 2**32 - 1
@@ -101,13 +100,13 @@ for line in fileinput.input():
         entrypoints.append((m.group(1), m.group(2), m.group(3), i, h))
         i = i + 1
 
-# For outputting entrypoints.h we generate a anv_EntryPoint() prototype
+# For outputting entrypoints.h we generate a val_EntryPoint() prototype
 # per entry point.
 
 if opt_header:
     print "/* This file generated from vk_gen.py, don't edit directly. */\n"
 
-    print "struct %s_dispatch_table {" % prefix
+    print "struct val_dispatch_table {"
     print "   union {"
     print "      void *entrypoints[%d];" % len(entrypoints)
     print "      struct {"
@@ -116,19 +115,19 @@ if opt_header:
         guard = get_platform_guard_macro(name)
         if guard is not None:
             print "#ifdef {0}".format(guard)
-            print "         %s (*%s)%s;" % (type, name, args)
+            print "         PFN_vk{0} {0};".format(name)
             print "#else"
             print "         void *{0};".format(name)
             print "#endif"
         else:
-            print "         %s (*%s)%s;" % (type, name, args)
+            print "         PFN_vk{0} {0};".format(name)
     print "      };\n"
     print "   };\n"
     print "};\n"
 
     for type, name, args, num, h in entrypoints:
         print_guard_start(name)
-        print "%s %s_%s%s;" % (type, prefix, name, args)
+        print "%s val_%s%s;" % (type, name, args)
         print_guard_end(name)
     exit()
 
@@ -159,9 +158,9 @@ print """/*
 
 /* DO NOT EDIT! This is a generated file. */
 
-#include "%s_private.h"
+#include "val_private.h"
 
-struct %s_entrypoint {
+struct val_entrypoint {
    uint32_t name;
    uint32_t hash;
 };
@@ -171,7 +170,7 @@ struct %s_entrypoint {
  * store the index into this big string.
  */
 
-static const char strings[] =""" % (prefix, prefix)
+static const char strings[] ="""
 
 offsets = []
 i = 0;
@@ -179,67 +178,43 @@ for type, name, args, num, h in entrypoints:
     print "   \"vk%s\\0\"" % name
     offsets.append(i)
     i += 2 + len(name) + 1
-print """   ;
+print "   ;"
 
-/* Weak aliases for all potential validate functions. These will resolve to
- * NULL if they're not defined, which lets the resolve_entrypoint() function
- * either pick a validate wrapper if available or just plug in the actual
- * entry point.
- */
-"""
+# Now generate the table of all entry points
 
-# Now generate the table of all entry points and their validation functions
-
-print "\nstatic const struct %s_entrypoint entrypoints[] = {" % prefix
+print "\nstatic const struct val_entrypoint entrypoints[] = {"
 for type, name, args, num, h in entrypoints:
     print "   { %5d, 0x%08x }," % (offsets[num], h)
 print "};\n"
 
-for layer in [ prefix]:
+print """
+
+/* Weak aliases for all potential implementations. These will resolve to
+ * NULL if they're not defined, which lets the resolve_entrypoint() function
+ * either pick the correct entry point.
+ */
+"""
+
+for layer in [ "val" ]:
     for type, name, args, num, h in entrypoints:
-        guard = get_platform_guard_macro(name)
-        if guard is not None:
-            print "#ifdef {0}".format(guard)
-            print "    %s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
-            print "#endif"
-        else:
-            print "    %s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
-    print "\nconst struct %s_dispatch_table %s_layer = {" % (prefix, layer)
+        print_guard_start(name)
+        print "%s %s_%s%s __attribute__ ((weak));" % (type, layer, name, args)
+        print_guard_end(name)
+    print "\nconst struct val_dispatch_table %s_layer = {" % layer
     for type, name, args, num, h in entrypoints:
-        guard = get_platform_guard_macro(name)
-        if guard is not None:
-            print "#ifdef {0}".format(guard)
-            print "   .%s = %s_%s," % (name, layer, name)
-            print "#else"
-            print "   .%s = NULL," % (name)
-            print "#endif"
-        else:
-            print "   .%s = %s_%s," % (name, layer, name)
+        print_guard_start(name)
+        print "   .%s = %s_%s," % (name, layer, name)
+        print_guard_end(name)
     print "};\n"
 
 print """
+
 void * __attribute__ ((noinline))
-%s_resolve_entrypoint(uint32_t index)
+val_resolve_entrypoint(uint32_t index)
 {
-   return %s_layer.entrypoints[index];
+   return val_layer.entrypoints[index];
 }
-""" % (prefix, prefix)
-
-# Now output ifuncs and their resolve helpers for all entry points. The
-# resolve helper calls resolve_entrypoint() with the entry point index, which
-# lets the resolver look it up in the table.
-
-for type, name, args, num, h in entrypoints:
-    guard = get_platform_guard_macro(name)
-    if guard is not None:
-        print "#ifdef {0}".format(guard)
-        print "    static void *resolve_%s(void) { return %s_resolve_entrypoint(%d); }" % (name, prefix, num)
-        print "    %s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));" % (type, name, args, name)
-        print "#endif"
-    else:
-        print "static void *resolve_%s(void) { return %s_resolve_entrypoint(%d); }" % (name, prefix, num)
-        print "%s vk%s%s\n   __attribute__ ((ifunc (\"resolve_%s\"), visibility (\"default\")));\n" % (type, name, args, name)
-
+"""
 
 # Now generate the hash table used for entry point look up.  This is a
 # uint16_t table of entry point indices. We use 0xffff to indicate an entry
@@ -289,11 +264,11 @@ print "};"
 
 print """
 void *
-%s_lookup_entrypoint(const char *name)
+val_lookup_entrypoint(const char *name)
 {
    static const uint32_t prime_factor = %d;
    static const uint32_t prime_step = %d;
-   const struct %s_entrypoint *e;
+   const struct val_entrypoint *e;
    uint32_t hash, h, i;
    const char *p;
 
@@ -313,6 +288,6 @@ void *
    if (strcmp(name, strings + e->name) != 0)
       return NULL;
 
-   return %s_resolve_entrypoint(i);
+   return val_resolve_entrypoint(i);
 }
-""" % (prefix, prime_factor, prime_step, prefix, hash_mask, prefix)
+""" % (prime_factor, prime_step, hash_mask)

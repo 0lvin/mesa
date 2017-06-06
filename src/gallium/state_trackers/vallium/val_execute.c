@@ -776,7 +776,7 @@ VkResult val_execute_cmds(struct val_device *device,
       cmd_buffer->ctx = device->pscreen->context_create(device->pscreen,
 							NULL, PIPE_CONTEXT_ROBUST_BUFFER_ACCESS);
    if (!cmd_buffer->ctx)
-      return VK_ERROR_INITIALIZATION_FAILED;
+      return vk_error(VK_ERROR_INITIALIZATION_FAILED);
 
    memset(&state, 0, sizeof(state));
    state.pctx = cmd_buffer->ctx;

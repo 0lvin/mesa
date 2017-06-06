@@ -32,7 +32,7 @@ val_init_wsi(struct val_physical_device *physical_device)
 #ifdef VK_USE_PLATFORM_XCB_KHR
 	result = val_x11_init_wsi(physical_device);
 	if (result != VK_SUCCESS)
-		return result;
+		return vk_error(result);
 #endif
 
 #ifdef HAVE_WAYLAND_PLATFORM
@@ -41,7 +41,7 @@ val_init_wsi(struct val_physical_device *physical_device)
 #ifdef VK_USE_PLATFORM_XCB_KHR
 		val_x11_finish_wsi(physical_device);
 #endif
-		return result;
+		return vk_error(result);
 	}
 #endif
 
@@ -138,7 +138,7 @@ VkResult val_CreateSwapchainKHR(
    VkResult result = iface->create_swapchain(surface, device, pCreateInfo,
                                              pAllocator, &swapchain);
    if (result != VK_SUCCESS)
-      return result;
+      return vk_error(result);
 
    *pSwapchain = val_swapchain_to_handle(swapchain);
 
@@ -197,7 +197,7 @@ VkResult val_QueuePresentKHR(
                                         pPresentInfo->pImageIndices[i]);
       /* TODO: What if one of them returns OUT_OF_DATE? */
       if (result != VK_SUCCESS)
-         return result;
+         return vk_error(result);
    }
 
    return VK_SUCCESS;

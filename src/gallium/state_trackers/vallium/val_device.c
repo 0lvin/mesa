@@ -70,9 +70,7 @@ static const VkExtensionProperties device_extensions[] = {
 void
 val_mmap(struct val_device_memory *mem, struct val_device *device)
 {
-	val_finishme("Premapped(%p) %p ~ %p", mem, mem->map, mem->bo);
-
-	//already mapped
+	// already mapped
 	if (mem->map)
 		return;
 
@@ -89,10 +87,6 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					 mem->bo->width0, mem->bo->height0, mem->bo->depth0,
 					 &mem->box);
 
-		val_finishme("Map type %d %d * %d * %d \n", mem->bo->target,
-		              mem->box.width, mem->box.height, mem->box.depth);
-
-
 		mem->map = device->pctx->transfer_map(device->pctx,
 					    mem->bo,
 					    0,
@@ -100,7 +94,6 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					    &mem->box,
 					    &mem->bo_t);
 	}
-	val_finishme("Mapped %p ~ %d", mem->map, mem->box.width * mem->box.height * mem->box.depth);
 }
 
 void
@@ -549,10 +542,12 @@ PFN_vkVoidFunction val_GetInstanceProcAddr(
 /* The loader wants us to expose a second GetInstanceProcAddr function
  * to work around certain LD_PRELOAD issues seen in apps.
  */
+PUBLIC
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(
 								   VkInstance                                  instance,
 								   const char*                                 pName);
 
+PUBLIC
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(
 								   VkInstance                                  instance,
 								   const char*                                 pName)
@@ -756,8 +751,6 @@ VkResult val_AllocateMemory(
 			    const VkAllocationCallbacks*                pAllocator,
 			    VkDeviceMemory*                             pMem)
 {
-	val_finishme("Enter dev=%p", _device);
-
 	VAL_FROM_HANDLE(val_device, device, _device);
 	struct val_device_memory *mem;
 
@@ -788,8 +781,6 @@ VkResult val_AllocateMemory(
 
 	*pMem = val_device_memory_to_handle(mem);
 
-	val_finishme("Leave dev=%p/mem=%p[%lu]", _device, mem, mem->map_size);
-
 	return VK_SUCCESS;
 }
 
@@ -798,8 +789,6 @@ void val_FreeMemory(
 		    VkDeviceMemory                              _mem,
 		    const VkAllocationCallbacks*                pAllocator)
 {
-	val_finishme("Enter dev=%p/mem=%p", _device, _mem);
-
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _mem);
 
@@ -823,8 +812,6 @@ VkResult val_MapMemory(
 		       VkMemoryMapFlags                            flags,
 		       void**                                      ppData)
 {
-	val_finishme("Enter dev=%p/mem=%p/offset=%lu/size=%lu", _device, _memory, offset, size);
-
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_device, device, _device);
 
@@ -835,7 +822,7 @@ VkResult val_MapMemory(
 
 	if (!mem->bo) {
 		mem->bo = device->pscreen->resource_create(device->pscreen, &mem->template);
-		val_finishme("Asked about map before create image/buffer, create without user memmory %p", mem->bo);
+		val_finishme("Asked about map before create image/buffer.");
 	}
 
 	val_mmap(mem, device);
@@ -845,25 +832,20 @@ VkResult val_MapMemory(
 
 	*ppData = (char*)mem->map + offset;
 
-	stub_return(VK_SUCCESS);
+	return VK_SUCCESS;
 }
 
 void val_UnmapMemory(
 		     VkDevice                                    _device,
 		     VkDeviceMemory                              _memory)
 {
-	val_finishme("Enter dev=%p/mem=%p", _device, _memory);
-
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_device, device, _device);
 
 	if (mem == NULL)
 		return;
 
-	fprintf(stderr, "Size: %d\n", mem->box.width * mem->box.height * mem->box.depth);
-
 	val_munmap(mem, device);
-	stub();
 }
 
 VkResult val_FlushMappedMemoryRanges(
@@ -939,20 +921,20 @@ VkResult val_BindBufferMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
-	val_finishme("Enter dev=%p/buf=%p/mem=%p", _device, _buffer, _memory);
-
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_buffer, buffer, _buffer);
 
 	if (mem) {
-		val_finishme("%p: Offset %p[%ld] ~ %lu", mem, mem->bo, memoryOffset, mem->map_size);
+
 		if (mem->bo) {
-			val_finishme("We already have some allocated memmory: %p, offset %lu ignored", mem->bo, memoryOffset);
+
+			assert(memoryOffset == 0);
+
+			val_finishme("We already have some allocated memmory with offset ignored.");
 			buffer->bo = mem->bo;
 		}
 		if (!buffer->bo) {
-			val_finishme("Use failback for create resource.");
 			buffer->bo = device->pscreen->resource_create(device->pscreen,
 								&buffer->template);
 		}
@@ -972,14 +954,11 @@ VkResult val_BindImageMemory(
     VkDeviceMemory                              _memory,
     VkDeviceSize                                memoryOffset)
 {
-	val_finishme("Enter dev=%p/image=%p/mem=%p", _device, _image, _memory);
-
 	VAL_FROM_HANDLE(val_device, device, _device);
 	VAL_FROM_HANDLE(val_device_memory, mem, _memory);
 	VAL_FROM_HANDLE(val_image, image, _image);
 
 	if (mem) {
-		val_finishme("Offset %p[%ld]", mem->bo, memoryOffset);
 		if (mem->bo) {
 			val_finishme("We already have some allocated memmory: %p", mem->bo);
 			image->bo = mem->bo;
@@ -1072,8 +1051,6 @@ VkResult val_CreateBuffer(
     const VkAllocationCallbacks*                pAllocator,
     VkBuffer*                                   pBuffer)
 {
-	val_finishme("Enter dev=%p", _device);
-
 	VAL_FROM_HANDLE(val_device, device, _device);
 	struct val_buffer *buffer;
 
@@ -1093,8 +1070,6 @@ VkResult val_CreateBuffer(
 						buffer->size);
 	buffer->total_size = val_texture_size(&buffer->template);
 	*pBuffer = val_buffer_to_handle(buffer);
-
-	val_finishme("Leave dev=%p/buffer=%p[%lu]", _device, buffer, buffer->size);
 
 	return VK_SUCCESS;
 }

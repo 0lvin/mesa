@@ -499,11 +499,9 @@ x11_queue_present(struct val_swapchain *val_chain,
 
 	xcb_void_cookie_t cookie;
 
-	fprintf(stderr, "chain is %p by map\n", chain);
-
 	if (!image->image->bo) {
 		fprintf(stderr, "No image\n");
-		stub_return(VK_SUCCESS);
+		return VK_SUCCESS;
 	}
 
 	val_mmap(image->memory, val_chain->device);
@@ -535,7 +533,7 @@ x11_queue_present(struct val_swapchain *val_chain,
 
 	val_munmap(image->memory, val_chain->device);
 
-	stub_return(VK_SUCCESS);
+	return VK_SUCCESS;
 }
 
 static VkResult

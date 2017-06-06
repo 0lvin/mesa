@@ -93,7 +93,7 @@ deep_copy_vertex_input_state(struct VkPipelineVertexInputStateCreateInfo *dst,
 
    dst_binding_descriptions = malloc(src->vertexBindingDescriptionCount * sizeof(VkVertexInputBindingDescription));
    if (!dst_binding_descriptions)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    for (i = 0; i < dst->vertexBindingDescriptionCount; i++) {
       memcpy(&dst_binding_descriptions[i], &src->pVertexBindingDescriptions[i], sizeof(VkVertexInputBindingDescription));
    }
@@ -103,7 +103,7 @@ deep_copy_vertex_input_state(struct VkPipelineVertexInputStateCreateInfo *dst,
 
    dst_attrib_descriptions = malloc(src->vertexAttributeDescriptionCount * sizeof(VkVertexInputAttributeDescription));
    if (!dst_attrib_descriptions)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
    for (i = 0; i < dst->vertexAttributeDescriptionCount; i++) {
       memcpy(&dst_attrib_descriptions[i], &src->pVertexAttributeDescriptions[i], sizeof(VkVertexInputAttributeDescription));
@@ -177,7 +177,7 @@ deep_copy_dynamic_state(VkPipelineDynamicStateCreateInfo *dst,
 
    dynamic_states = malloc(src->dynamicStateCount * sizeof(VkDynamicState));
    if (!dynamic_states)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
 
    memcpy(dynamic_states, src->pDynamicStates, src->dynamicStateCount * sizeof(VkDynamicState));
    dst->dynamicStateCount = src->dynamicStateCount;
@@ -211,7 +211,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
    for (i = 0 ; i < dst->stageCount; i++) {
       result = deep_copy_shader_stage(&stages[i], &src->pStages[i]);
       if (result != VK_SUCCESS)
-         return result;
+         return vk_error(result);
    }
    dst->pStages = stages;
 
@@ -220,13 +220,13 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
    result = deep_copy_vertex_input_state(vertex_input,
                                          src->pVertexInputState);
    if (result != VK_SUCCESS)
-      return result;
+      return vk_error(result);
    dst->pVertexInputState = vertex_input;
 
    /* pInputAssemblyState */
    input_assembly = malloc(sizeof(VkPipelineInputAssemblyStateCreateInfo));
    if (!input_assembly)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    memcpy(input_assembly, src->pInputAssemblyState, sizeof(VkPipelineInputAssemblyStateCreateInfo));
    dst->pInputAssemblyState = input_assembly;
 
@@ -239,7 +239,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
       VkPipelineViewportStateCreateInfo *viewport_state;
       viewport_state = malloc(sizeof(VkPipelineViewportStateCreateInfo));
       if (!viewport_state)
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
       deep_copy_viewport_state(viewport_state, src->pViewportState);
       dst->pViewportState = viewport_state;
    } else
@@ -248,7 +248,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
    /* pRasterizationState */
    raster_state = malloc(sizeof(VkPipelineRasterizationStateCreateInfo));
    if (!raster_state)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
    memcpy(raster_state, src->pRasterizationState, sizeof(VkPipelineRasterizationStateCreateInfo));
    dst->pRasterizationState = raster_state;
 
@@ -257,7 +257,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
       VkPipelineMultisampleStateCreateInfo*   ms_state;
       ms_state = malloc(sizeof(VkPipelineMultisampleStateCreateInfo));
       if (!ms_state)
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
       /* does samplemask need deep copy? */
       memcpy(ms_state, src->pMultisampleState, sizeof(VkPipelineMultisampleStateCreateInfo));
       dst->pMultisampleState = ms_state;
@@ -270,7 +270,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
 
       ds_state = malloc(sizeof(VkPipelineDepthStencilStateCreateInfo));
       if (!ds_state)
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
       memcpy(ds_state, src->pDepthStencilState, sizeof(VkPipelineDepthStencilStateCreateInfo));
       dst->pDepthStencilState = ds_state;
    } else
@@ -282,7 +282,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
 
       cb_state = malloc(sizeof(VkPipelineColorBlendStateCreateInfo));
       if (!cb_state)
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
       deep_copy_color_blend_state(cb_state, src->pColorBlendState);
       dst->pColorBlendState = cb_state;
    } else
@@ -294,7 +294,7 @@ deep_copy_graphics_create_info(VkGraphicsPipelineCreateInfo *dst,
       /* pDynamicState */
       dyn_state = malloc(sizeof(VkPipelineDynamicStateCreateInfo));
       if (!dyn_state)
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
+         return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
       deep_copy_dynamic_state(dyn_state, src->pDynamicState);
       dst->pDynamicState = dyn_state;
    } else
@@ -317,7 +317,7 @@ deep_copy_compute_create_info(VkComputePipelineCreateInfo *dst,
 
    result = deep_copy_shader_stage(&dst->stage, &src->stage);
    if (result != VK_SUCCESS)
-     return result;
+     return vk_error(result);
    return VK_SUCCESS;
 }
 
@@ -514,7 +514,7 @@ val_graphics_pipeline_create(
 				       pAllocator);
    if (result != VK_SUCCESS) {
       vk_free2(&device->alloc, pAllocator, pipeline);
-      return result;
+      return vk_error(result);
    }
 
 //   if (cache == NULL)
@@ -545,7 +545,7 @@ VkResult val_CreateGraphicsPipelines(
             val_DestroyPipeline(_device, pPipelines[j], pAllocator);
          }
 
-         return result;
+         return vk_error(result);
       }
    }
 
@@ -604,7 +604,7 @@ val_compute_pipeline_create(
 				      pAllocator);
    if (result != VK_SUCCESS) {
       vk_free2(&device->alloc, pAllocator, pipeline);
-      return result;
+      return vk_error(result);
    }
 
 //   if (cache == NULL)
@@ -635,7 +635,7 @@ VkResult val_CreateComputePipelines(
             val_DestroyPipeline(_device, pPipelines[j], pAllocator);
          }
 
-         return result;
+         return vk_error(result);
       }
    }
 
