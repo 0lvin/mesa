@@ -452,22 +452,28 @@ static void handle_set_stage(struct rendering_state *state,
 static VkResult handle_compute_descriptor_sets(struct val_cmd_buffer_entry *cmd,
 					       struct rendering_state *state)
 {
-   struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
-   int i;
-   for (i = 0; i < bds->count; i++) {
-      const struct val_descriptor_set *set = bds->sets[i];
+	struct val_cmd_bind_descriptor_sets *bds = &cmd->u.descriptor_sets;
+	int i;
+	for (i = 0; i < bds->count; i++) {
+		const struct val_descriptor_set *set = bds->sets[i];
 
-      if (set->layout->shader_stages & VK_SHADER_STAGE_COMPUTE_BIT)
-	 handle_set_stage(state, set, PIPE_SHADER_COMPUTE);
-   }
+		if (set->layout->shader_stages & VK_SHADER_STAGE_COMPUTE_BIT)
+			handle_set_stage(state, set, PIPE_SHADER_COMPUTE);
+	}
 
-   state->pctx->set_shader_images(state->pctx, PIPE_SHADER_COMPUTE,
-				  0, state->num_shader_images[PIPE_SHADER_COMPUTE],
-				  state->iv[PIPE_SHADER_COMPUTE]);
+	if (!state->pctx->set_shader_images)
+		return vk_error(VK_ERROR_INITIALIZATION_FAILED);
 
-   state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_COMPUTE,
+	state->pctx->set_shader_images(state->pctx, PIPE_SHADER_COMPUTE,
+				    0, state->num_shader_images[PIPE_SHADER_COMPUTE],
+				    state->iv[PIPE_SHADER_COMPUTE]);
+
+	if (!state->pctx->set_constant_buffer)
+		return vk_error(VK_ERROR_INITIALIZATION_FAILED);
+
+	state->pctx->set_constant_buffer(state->pctx, PIPE_SHADER_COMPUTE,
 				    1, state->const_buffer[PIPE_SHADER_COMPUTE]);
-   return VK_SUCCESS;
+	return VK_SUCCESS;
 }
 
 static VkResult handle_descriptor_sets(struct val_cmd_buffer_entry *cmd,
@@ -771,6 +777,7 @@ VkResult val_execute_cmds(struct val_device *device,
 {
    struct val_cmd_buffer_entry *cmd;
    struct rendering_state state;
+   VkResult result = VK_SUCCESS;
 
    if (!cmd_buffer->ctx)
       cmd_buffer->ctx = device->pscreen->context_create(device->pscreen,
@@ -787,47 +794,50 @@ VkResult val_execute_cmds(struct val_device *device,
       fprintf(stderr, "cmd type %d\n", cmd->cmd_type);
       switch (cmd->cmd_type) {
       case VAL_CMD_BIND_PIPELINE:
-         handle_pipeline(cmd, &state);
+         result = handle_pipeline(cmd, &state);
          break;
       case VAL_CMD_BIND_VERTEX_BUFFERS:
-         handle_vertex_buffers(cmd, &state);
+         result = handle_vertex_buffers(cmd, &state);
          break;
       case VAL_CMD_BIND_DESCRIPTOR_SETS:
-         handle_descriptor_sets(cmd, &state);
+         result = handle_descriptor_sets(cmd, &state);
          break;
       case VAL_CMD_BEGIN_RENDER_PASS:
-         handle_begin_render_pass(cmd, &state);
+         result = handle_begin_render_pass(cmd, &state);
          break;
       case VAL_CMD_END_RENDER_PASS:
-         handle_end_render_pass(cmd, &state);
+         result = handle_end_render_pass(cmd, &state);
          break;
       case VAL_CMD_DRAW:
          emit_state(&state);
-         handle_draw(cmd, &state);
+         result = handle_draw(cmd, &state);
          break;
       case VAL_CMD_DYN_SET_VIEWPORT:
-         handle_dyn_set_viewport(cmd, &state);
+         result = handle_dyn_set_viewport(cmd, &state);
          break;
       case VAL_CMD_COPY_IMAGE_TO_BUFFER:
          handle_copy_image_to_buffer(cmd, &state);
          break;
       case VAL_CMD_DRAW_INDEXED:
-	 emit_state(&state);
-	 handle_draw_indexed(cmd, &state);
-	 break;
+         emit_state(&state);
+         result = handle_draw_indexed(cmd, &state);
+         break;
       case VAL_CMD_BIND_INDEX_BUFFER:
-	 handle_index_buffer(cmd, &state);
-	 break;
+         result = handle_index_buffer(cmd, &state);
+         break;
       case VAL_CMD_DISPATCH:
-	 handle_dispatch(cmd, &state);
-	 break;
+         result = handle_dispatch(cmd, &state);
+         break;
       case VAL_CMD_DISPATCH_INDIRECT:
-	 handle_dispatch_indirect(cmd, &state);
-	 break;
+         result = handle_dispatch_indirect(cmd, &state);
+         break;
       case VAL_CMD_COPY_IMAGE:
-         handle_copy_image(cmd, &state);
+         result = handle_copy_image(cmd, &state);
          break;
       }
+
+      if (result != VK_SUCCESS)
+         return vk_error(result);
    }
 
    state.start_vb = -1;
