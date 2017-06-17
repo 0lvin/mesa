@@ -772,6 +772,26 @@ static VkResult handle_dispatch_indirect(struct val_cmd_buffer_entry *cmd,
    return VK_SUCCESS;
 }
 
+char* val_cmd_to_string(uint32_t cmd_type)
+{
+      switch (cmd_type) {
+      case VAL_CMD_BIND_PIPELINE: return "BindPipeline";
+      case VAL_CMD_BIND_VERTEX_BUFFERS: return "BindVertexBuffers";
+      case VAL_CMD_BIND_DESCRIPTOR_SETS: return "BindDescriptorSets";
+      case VAL_CMD_BEGIN_RENDER_PASS: return "BeginRenderPass";
+      case VAL_CMD_END_RENDER_PASS: return "EndRenderPass";
+      case VAL_CMD_DRAW: return "Draw";
+      case VAL_CMD_DYN_SET_VIEWPORT: return "SetViewport";
+      case VAL_CMD_COPY_IMAGE_TO_BUFFER: return "CopyImageToBuffer";
+      case VAL_CMD_DRAW_INDEXED: return "DrawIndexed";
+      case VAL_CMD_BIND_INDEX_BUFFER: return "BindIndexBuffer";
+      case VAL_CMD_DISPATCH: return "Dispatch";
+      case VAL_CMD_DISPATCH_INDIRECT: return "DispatchIndirect";
+      case VAL_CMD_COPY_IMAGE: return "CopyImage";
+      default: return "Unknown";
+      }
+}
+
 VkResult val_execute_cmds(struct val_device *device,
                           struct val_cmd_buffer *cmd_buffer)
 {
@@ -791,7 +811,7 @@ VkResult val_execute_cmds(struct val_device *device,
    state.dsa_dirty = true;
    /* create a gallium context */
    LIST_FOR_EACH_ENTRY(cmd, &cmd_buffer->cmds, cmd_link) {
-      fprintf(stderr, "cmd type %d\n", cmd->cmd_type);
+      fprintf(stderr, "cmd type %s\n", val_cmd_to_string(cmd->cmd_type));
       switch (cmd->cmd_type) {
       case VAL_CMD_BIND_PIPELINE:
          result = handle_pipeline(cmd, &state);
@@ -816,7 +836,7 @@ VkResult val_execute_cmds(struct val_device *device,
          result = handle_dyn_set_viewport(cmd, &state);
          break;
       case VAL_CMD_COPY_IMAGE_TO_BUFFER:
-         handle_copy_image_to_buffer(cmd, &state);
+         result = handle_copy_image_to_buffer(cmd, &state);
          break;
       case VAL_CMD_DRAW_INDEXED:
          emit_state(&state);

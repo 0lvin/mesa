@@ -928,10 +928,8 @@ VkResult val_BindBufferMemory(
 	if (mem) {
 
 		if (mem->bo) {
-
-			assert(memoryOffset == 0);
-
-			val_finishme("We already have some allocated memmory with offset ignored.");
+			val_finishme("We already have some allocated memmory: %p", mem->bo);
+			buffer->offset = memoryOffset;
 			buffer->bo = mem->bo;
 		}
 		if (!buffer->bo) {
@@ -961,6 +959,7 @@ VkResult val_BindImageMemory(
 	if (mem) {
 		if (mem->bo) {
 			val_finishme("We already have some allocated memmory: %p", mem->bo);
+			image->offset = memoryOffset;
 			image->bo = mem->bo;
 		}
 		if (!image->bo) {

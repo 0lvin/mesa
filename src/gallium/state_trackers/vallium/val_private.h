@@ -252,6 +252,7 @@ struct val_image {
 	VkImageType type;
 	VkFormat vk_format;
 	VkDeviceSize size;
+	VkDeviceSize offset;
 	uint32_t alignment;
 
 	// template for resource_from_user_memory
@@ -476,6 +477,8 @@ struct val_cmd_pool {
 #define VAL_CMD_DISPATCH 11
 #define VAL_CMD_DISPATCH_INDIRECT 12
 #define VAL_CMD_COPY_IMAGE 13
+
+char* val_cmd_to_string(uint32_t cmd_type);
 
 struct val_cmd_bind_pipeline {
    VkPipelineBindPoint bind_point;

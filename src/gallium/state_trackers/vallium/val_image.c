@@ -80,6 +80,7 @@ val_image_create(VkDevice _device,
          image->template.bind = create_info->bind_flags;
       image->bo = NULL;
 
+      image->offset = 0;
       image->size = val_texture_size(&image->template);
    }
    *pImage = val_image_to_handle(image);
