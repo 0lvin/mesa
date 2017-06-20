@@ -194,16 +194,17 @@ struct val_physical_device {
     struct pipe_screen *pscreen;
 };
 
+#define MAX_PHYSICAL_DEVICES 8
+
 struct val_instance {
     VK_LOADER_DATA _loader_data;
     VkAllocationCallbacks alloc;
 
     uint32_t apiVersion;
     int physicalDeviceCount;
-    struct val_physical_device physicalDevice;
+    struct val_physical_device physicalDevices[MAX_PHYSICAL_DEVICES + 1];
 
     struct pipe_loader_device *devs;
-    int num_devices;
 };
 
 VkResult val_init_wsi(struct val_physical_device *physical_device);

@@ -205,8 +205,10 @@ void val_DestroyInstance(
 {
 	VAL_FROM_HANDLE(val_instance, instance, _instance);
 
-	if (   instance->physicalDeviceCount != -1) {
-		val_finish_wsi(&instance->physicalDevice);
+	if (instance->physicalDeviceCount != -1) {
+		for (int i = 0; i < instance->physicalDeviceCount; i++) {
+			val_finish_wsi(&instance->physicalDevices[i]);
+		}
 	}
 	//   _mesa_locale_fini();
 	vk_free(&instance->alloc, instance);
@@ -249,44 +251,41 @@ VkResult val_EnumeratePhysicalDevices(
 	if (instance->physicalDeviceCount < 0) {
 
 		/* sw only for now */
-		instance->num_devices = pipe_loader_sw_probe(NULL, 0);
-
-		assert(instance->num_devices == 1);
+		instance->physicalDeviceCount = 0;
 
 		int fd = -1;
 		char path[20];
-		for (unsigned i = 0; i < 8; i++) {
+		for (unsigned i = 0; i < MAX_PHYSICAL_DEVICES; i++) {
 			snprintf(path, sizeof(path), "/dev/dri/renderD%d", 128 + i);
 			fd = loader_open_device(path);
-			if (fd >= 0) break;
+
+			if (fd >= 0 && pipe_loader_drm_probe_fd(&instance->devs, fd)) {
+				fprintf(stderr, "use real device %s.\n", instance->devs[0].driver_name);
+				result = val_physical_device_init(&instance->physicalDevices[instance->physicalDeviceCount],
+													instance, &instance->devs[0]);
+				if (result == VK_SUCCESS) {
+					instance->physicalDeviceCount ++;
+				}
+			}
 		}
 
-		if (fd >= 0 && pipe_loader_drm_probe_fd(&instance->devs, fd) && 0) {
-			fprintf(stderr, "use real device %s.\n", instance->devs[0].driver_name);
-			result = val_physical_device_init(&instance->physicalDevice,
-							instance, &instance->devs[0]);
-		}
-
-		if (result != VK_SUCCESS && pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf)) {
+		if (pipe_loader_sw_probe_dri(&instance->devs, &val_sw_lf)) {
 			fprintf(stderr, "use software failback %s.\n", instance->devs[0].driver_name);
-			result = val_physical_device_init(&instance->physicalDevice,
-							instance, &instance->devs[0]);
-		}
-
-		if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
-			instance->physicalDeviceCount = 0;
-		} else if (result == VK_SUCCESS) {
-			instance->physicalDeviceCount = 1;
-		} else {
-			return result;
+			result = val_physical_device_init(&instance->physicalDevices[instance->physicalDeviceCount],
+												instance, &instance->devs[0]);
+			if (result == VK_SUCCESS) {
+				instance->physicalDeviceCount ++;
+			}
 		}
 	}
 
 	if (!pPhysicalDevices) {
 		*pPhysicalDeviceCount = instance->physicalDeviceCount;
 	} else if (*pPhysicalDeviceCount >= 1) {
-		pPhysicalDevices[0] = val_physical_device_to_handle(&instance->physicalDevice);
-		*pPhysicalDeviceCount = 1;
+		for (int i = 0; i < instance->physicalDeviceCount; i++) {
+			pPhysicalDevices[i] = val_physical_device_to_handle(&instance->physicalDevices[i]);
+		}
+		*pPhysicalDeviceCount = instance->physicalDeviceCount;
 	} else {
 		*pPhysicalDeviceCount = 0;
 	}
