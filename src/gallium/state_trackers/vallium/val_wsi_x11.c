@@ -38,10 +38,11 @@
 struct wsi_x11_connection {
    bool has_dri3;
    bool has_present;
+   bool is_proprietary_x11;
 };
 
 struct wsi_x11 {
-   struct val_wsi_interface base;
+   struct wsi_interface base;
 
    pthread_mutex_t                              mutex;
    /* Hash table of xcb_connection -> wsi_x11_connection mappings */
@@ -49,13 +50,14 @@ struct wsi_x11 {
 };
 
 static struct wsi_x11_connection *
-wsi_x11_connection_create(struct val_physical_device *physical_device, xcb_connection_t *conn)
+wsi_x11_connection_create(const VkAllocationCallbacks *alloc,
+                          xcb_connection_t *conn)
 {
-   xcb_query_extension_cookie_t dri3_cookie, pres_cookie;
-   xcb_query_extension_reply_t *dri3_reply, *pres_reply;
+   xcb_query_extension_cookie_t dri3_cookie, pres_cookie, amd_cookie, nv_cookie;
+   xcb_query_extension_reply_t *dri3_reply, *pres_reply, *amd_reply, *nv_reply;
 
    struct wsi_x11_connection *wsi_conn =
-      vk_alloc(&physical_device->instance->alloc, sizeof(*wsi_conn), 8,
+      vk_alloc(alloc, sizeof(*wsi_conn), 8,
                 VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!wsi_conn)
       return NULL;
@@ -63,36 +65,73 @@ wsi_x11_connection_create(struct val_physical_device *physical_device, xcb_conne
    dri3_cookie = xcb_query_extension(conn, 4, "DRI3");
    pres_cookie = xcb_query_extension(conn, 7, "PRESENT");
 
+   /* We try to be nice to users and emit a warning if they try to use a
+    * Vulkan application on a system without DRI3 enabled.  However, this ends
+    * up spewing the warning when a user has, for example, both Intel
+    * integrated graphics and a discrete card with proprietary drivers and are
+    * running on the discrete card with the proprietary DDX.  In this case, we
+    * really don't want to print the warning because it just confuses users.
+    * As a heuristic to detect this case, we check for a couple of proprietary
+    * X11 extensions.
+    */
+   amd_cookie = xcb_query_extension(conn, 11, "ATIFGLRXDRI");
+   nv_cookie = xcb_query_extension(conn, 10, "NV-CONTROL");
+
    dri3_reply = xcb_query_extension_reply(conn, dri3_cookie, NULL);
    pres_reply = xcb_query_extension_reply(conn, pres_cookie, NULL);
-   if (dri3_reply == NULL || pres_reply == NULL) {
+   amd_reply = xcb_query_extension_reply(conn, amd_cookie, NULL);
+   nv_reply = xcb_query_extension_reply(conn, nv_cookie, NULL);
+   if (!dri3_reply || !pres_reply) {
       free(dri3_reply);
       free(pres_reply);
-      vk_free(&physical_device->instance->alloc, wsi_conn);
+      free(amd_reply);
+      free(nv_reply);
+      vk_free(alloc, wsi_conn);
       return NULL;
    }
 
    wsi_conn->has_dri3 = dri3_reply->present != 0;
    wsi_conn->has_present = pres_reply->present != 0;
+   wsi_conn->is_proprietary_x11 = false;
+   if (amd_reply && amd_reply->present)
+      wsi_conn->is_proprietary_x11 = true;
+   if (nv_reply && nv_reply->present)
+      wsi_conn->is_proprietary_x11 = true;
 
    free(dri3_reply);
    free(pres_reply);
+   free(amd_reply);
+   free(nv_reply);
 
    return wsi_conn;
 }
 
 static void
-wsi_x11_connection_destroy(struct val_physical_device *physical_device,
+wsi_x11_connection_destroy(const VkAllocationCallbacks *alloc,
                            struct wsi_x11_connection *conn)
 {
-   vk_free(&physical_device->instance->alloc, conn);
+   vk_free(alloc, conn);
+}
+
+static bool
+wsi_x11_check_for_dri3(struct wsi_x11_connection *wsi_conn)
+{
+  if (wsi_conn->has_dri3)
+    return true;
+  if (!wsi_conn->is_proprietary_x11) {
+    fprintf(stderr, "vulkan: No DRI3 support detected - required for presentation\n"
+                    "Note: you can probably enable DRI3 in your Xorg config\n");
+  }
+  return false;
 }
 
 static struct wsi_x11_connection *
-wsi_x11_get_connection(struct val_physical_device *physical_device, xcb_connection_t *conn)
+wsi_x11_get_connection(struct wsi_device *wsi_dev,
+		       const VkAllocationCallbacks *alloc,
+                       xcb_connection_t *conn)
 {
    struct wsi_x11 *wsi =
-      (struct wsi_x11 *)physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB];
+      (struct wsi_x11 *)wsi_dev->wsi[VK_ICD_WSI_PLATFORM_XCB];
 
    pthread_mutex_lock(&wsi->mutex);
 
@@ -104,14 +143,16 @@ wsi_x11_get_connection(struct val_physical_device *physical_device, xcb_connecti
       pthread_mutex_unlock(&wsi->mutex);
 
       struct wsi_x11_connection *wsi_conn =
-         wsi_x11_connection_create(physical_device, conn);
+         wsi_x11_connection_create(alloc, conn);
+      if (!wsi_conn)
+         return NULL;
 
       pthread_mutex_lock(&wsi->mutex);
 
       entry = _mesa_hash_table_search(wsi->connections, conn);
       if (entry) {
          /* Oops, someone raced us to it */
-         wsi_x11_connection_destroy(physical_device, wsi_conn);
+         wsi_x11_connection_destroy(alloc, wsi_conn);
       } else {
          entry = _mesa_hash_table_insert(wsi->connections, conn, wsi_conn);
       }
@@ -124,10 +165,13 @@ wsi_x11_get_connection(struct val_physical_device *physical_device, xcb_connecti
 
 static const VkSurfaceFormatKHR formats[] = {
    { .format = VK_FORMAT_B8G8R8A8_SRGB, },
+   { .format = VK_FORMAT_B8G8R8A8_UNORM, },
 };
 
 static const VkPresentModeKHR present_modes[] = {
+   VK_PRESENT_MODE_IMMEDIATE_KHR,
    VK_PRESENT_MODE_MAILBOX_KHR,
+   VK_PRESENT_MODE_FIFO_KHR,
 };
 
 static xcb_screen_t *
@@ -162,26 +206,6 @@ screen_get_visualtype(xcb_screen_t *screen, xcb_visualid_t visual_id,
             return visual_iter.data;
          }
       }
-   }
-
-   return NULL;
-}
-
-static xcb_visualtype_t *
-connection_get_visualtype(xcb_connection_t *conn, xcb_visualid_t visual_id,
-                          unsigned *depth)
-{
-   xcb_screen_iterator_t screen_iter =
-      xcb_setup_roots_iterator(xcb_get_setup(conn));
-
-   /* For this we have to iterate over all of the screens which is rather
-    * annoying.  Fortunately, there is probably only 1.
-    */
-   for (; screen_iter.rem; xcb_screen_next (&screen_iter)) {
-      xcb_visualtype_t *visual = screen_get_visualtype(screen_iter.data,
-                                                       visual_id, depth);
-      if (visual)
-         return visual;
    }
 
    return NULL;
@@ -240,46 +264,52 @@ VkBool32 val_GetPhysicalDeviceXcbPresentationSupportKHR(
 {
    VAL_FROM_HANDLE(val_physical_device, device, physicalDevice);
 
-   struct wsi_x11_connection *wsi_conn =
-      wsi_x11_get_connection(device, connection);
+   return wsi_get_physical_device_xcb_presentation_support(
+      &device->wsi_device,
+      &device->instance->alloc,
+      queueFamilyIndex, connection, visual_id);
+}
 
-   if (!wsi_conn->has_dri3) {
-      fprintf(stderr, "vulkan: No DRI3 support\n");
-      return false;
-   }
+static xcb_connection_t*
+x11_surface_get_connection(VkIcdSurfaceBase *icd_surface)
+{
+   if (icd_surface->platform == VK_ICD_WSI_PLATFORM_XLIB)
+      return XGetXCBConnection(((VkIcdSurfaceXlib *)icd_surface)->dpy);
+   else
+      return ((VkIcdSurfaceXcb *)icd_surface)->connection;
+}
 
-   unsigned visual_depth;
-   if (!connection_get_visualtype(connection, visual_id, &visual_depth))
-      return false;
-
-   if (visual_depth != 24 && visual_depth != 32)
-      return false;
-
-   return true;
+static xcb_window_t
+x11_surface_get_window(VkIcdSurfaceBase *icd_surface)
+{
+   if (icd_surface->platform == VK_ICD_WSI_PLATFORM_XLIB)
+      return ((VkIcdSurfaceXlib *)icd_surface)->window;
+   else
+      return ((VkIcdSurfaceXcb *)icd_surface)->window;
 }
 
 static VkResult
 x11_surface_get_support(VkIcdSurfaceBase *icd_surface,
-                        struct val_physical_device *device,
+                        struct wsi_device *wsi_device,
+                        const VkAllocationCallbacks *alloc,
                         uint32_t queueFamilyIndex,
                         VkBool32* pSupported)
 {
-   VkIcdSurfaceXcb *surface = (VkIcdSurfaceXcb *)icd_surface;
+   xcb_connection_t *conn = x11_surface_get_connection(icd_surface);
+   xcb_window_t window = x11_surface_get_window(icd_surface);
 
    struct wsi_x11_connection *wsi_conn =
-      wsi_x11_get_connection(device, surface->connection);
+      wsi_x11_get_connection(wsi_device, alloc, conn);
    if (!wsi_conn)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-   if (!wsi_conn->has_dri3) {
-      fprintf(stderr, "vulkan: No DRI3 support\n");
+   if (!wsi_x11_check_for_dri3(wsi_conn)) {
       *pSupported = false;
       return VK_SUCCESS;
    }
 
    unsigned visual_depth;
-   if (!get_visualtype_for_window(surface->connection, surface->window,
-                                  &visual_depth)) {
+   if (!get_visualtype_for_window(conn, window, &visual_depth)) {
       *pSupported = false;
       return VK_SUCCESS;
    }
@@ -295,25 +325,27 @@ x11_surface_get_support(VkIcdSurfaceBase *icd_surface,
 
 static VkResult
 x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
-                             struct val_physical_device *device,
                              VkSurfaceCapabilitiesKHR *caps)
 {
-   VkIcdSurfaceXcb *surface = (VkIcdSurfaceXcb *)icd_surface;
+   xcb_connection_t *conn = x11_surface_get_connection(icd_surface);
+   xcb_window_t window = x11_surface_get_window(icd_surface);
    xcb_get_geometry_cookie_t geom_cookie;
    xcb_generic_error_t *err;
    xcb_get_geometry_reply_t *geom;
    unsigned visual_depth;
 
-   geom_cookie = xcb_get_geometry(surface->connection, surface->window);
+   geom_cookie = xcb_get_geometry(conn, window);
 
    /* This does a round-trip.  This is why we do get_geometry first and
     * wait to read the reply until after we have a visual.
     */
    xcb_visualtype_t *visual =
-      get_visualtype_for_window(surface->connection, surface->window,
-                                &visual_depth);
+      get_visualtype_for_window(conn, window, &visual_depth);
 
-   geom = xcb_get_geometry_reply(surface->connection, geom_cookie, &err);
+   if (!visual)
+      return VK_ERROR_SURFACE_LOST_KHR;
+
+   geom = xcb_get_geometry_reply(conn, geom_cookie, &err);
    if (geom) {
       VkExtent2D extent = { geom->width, geom->height };
       caps->currentExtent = extent;
@@ -326,7 +358,8 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
        */
       caps->currentExtent = (VkExtent2D) { -1, -1 };
       caps->minImageExtent = (VkExtent2D) { 1, 1 };
-      caps->maxImageExtent = (VkExtent2D) { INT16_MAX, INT16_MAX };
+      /* This is the maximum supported size on Intel */
+      caps->maxImageExtent = (VkExtent2D) { 1 << 14, 1 << 14 };
    }
    free(err);
    free(geom);
@@ -339,8 +372,16 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
                                       VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
    }
 
+   /* For true mailbox mode, we need at least 4 images:
+    *  1) One to scan out from
+    *  2) One to have queued for scan-out
+    *  3) One to be currently held by the X server
+    *  4) One to render to
+    */
    caps->minImageCount = 2;
-   caps->maxImageCount = 4;
+   /* There is no real maximum */
+   caps->maxImageCount = 0;
+
    caps->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
    caps->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
    caps->maxImageArrayLayers = 1;
@@ -355,7 +396,7 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
 
 static VkResult
 x11_surface_get_formats(VkIcdSurfaceBase *surface,
-                        struct val_physical_device *device,
+                        struct wsi_device *wsi_device,
                         uint32_t *pSurfaceFormatCount,
                         VkSurfaceFormatKHR *pSurfaceFormats)
 {
@@ -364,16 +405,15 @@ x11_surface_get_formats(VkIcdSurfaceBase *surface,
       return VK_SUCCESS;
    }
 
-   assert(*pSurfaceFormatCount >= ARRAY_SIZE(formats));
+   *pSurfaceFormatCount = MIN2(*pSurfaceFormatCount, ARRAY_SIZE(formats));
    typed_memcpy(pSurfaceFormats, formats, *pSurfaceFormatCount);
-   *pSurfaceFormatCount = ARRAY_SIZE(formats);
 
-   return VK_SUCCESS;
+   return *pSurfaceFormatCount < ARRAY_SIZE(formats) ?
+      VK_INCOMPLETE : VK_SUCCESS;
 }
 
 static VkResult
 x11_surface_get_present_modes(VkIcdSurfaceBase *surface,
-                              struct val_physical_device *device,
                               uint32_t *pPresentModeCount,
                               VkPresentModeKHR *pPresentModes)
 {
@@ -382,19 +422,21 @@ x11_surface_get_present_modes(VkIcdSurfaceBase *surface,
       return VK_SUCCESS;
    }
 
-   assert(*pPresentModeCount >= ARRAY_SIZE(present_modes));
+   *pPresentModeCount = MIN2(*pPresentModeCount, ARRAY_SIZE(present_modes));
    typed_memcpy(pPresentModes, present_modes, *pPresentModeCount);
-   *pPresentModeCount = ARRAY_SIZE(present_modes);
 
-   return VK_SUCCESS;
+   return *pPresentModeCount < ARRAY_SIZE(present_modes) ?
+      VK_INCOMPLETE : VK_SUCCESS;
 }
 
 static VkResult
-x11_surface_create_swapchain(VkIcdSurfaceBase *surface,
-                             struct val_device *device,
-                             const VkSwapchainCreateInfoKHR* pCreateInfo,
+x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+                             VkDevice device,
+                             struct wsi_device *wsi_device,
+                             const VkSwapchainCreateInfoKHR *pCreateInfo,
                              const VkAllocationCallbacks* pAllocator,
-                             struct val_swapchain **swapchain);
+                             const struct wsi_image_fns *image_fns,
+                             struct wsi_swapchain **swapchain_out);
 
 VkResult val_CreateXcbSurfaceKHR(
     VkInstance                                  _instance,
@@ -423,11 +465,12 @@ struct x11_image {
 };
 
 struct x11_swapchain {
-   struct val_swapchain                        base;
+   struct wsi_swapchain                        base;
 
    xcb_connection_t *                           conn;
    xcb_window_t                                 window;
    xcb_gc_t                                     gc;
+   uint32_t                                     depth;
    VkExtent2D                                   extent;
    uint32_t                                     image_count;
    uint32_t                                     next_image;
@@ -435,7 +478,7 @@ struct x11_swapchain {
 };
 
 static VkResult
-x11_get_images(struct val_swapchain *val_chain,
+x11_get_images(struct wsi_swapchain *val_chain,
                uint32_t* pCount, VkImage *pSwapchainImages)
 {
    struct x11_swapchain *chain = (struct x11_swapchain *)val_chain;
@@ -455,7 +498,7 @@ x11_get_images(struct val_swapchain *val_chain,
 }
 
 static VkResult
-x11_acquire_next_image(struct val_swapchain *val_chain,
+x11_acquire_next_image(struct wsi_swapchain *val_chain,
                        uint64_t timeout,
                        VkSemaphore semaphore,
                        uint32_t *image_index)
@@ -488,9 +531,8 @@ x11_acquire_next_image(struct val_swapchain *val_chain,
 }
 
 static VkResult
-x11_queue_present(struct val_swapchain *val_chain,
-                  struct val_queue *queue,
-                  uint32_t image_index)
+x11_queue_present(struct wsi_swapchain *val_chain,
+                             uint32_t image_index)
 {
 	struct x11_swapchain *chain = (struct x11_swapchain *)val_chain;
 	struct x11_image *image = &chain->images[image_index];
@@ -504,7 +546,7 @@ x11_queue_present(struct val_swapchain *val_chain,
 		return VK_SUCCESS;
 	}
 
-	val_mmap(image->memory, val_chain->device);
+	val_mmap(image->memory, val_device_from_handle(val_chain->device));
 
 	if (!image->memory->map)
 		return vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
@@ -531,13 +573,13 @@ x11_queue_present(struct val_swapchain *val_chain,
 	       chain->extent.width * chain->extent.height *
 	       util_format_get_blocksize(image->memory->bo->format));
 
-	val_munmap(image->memory, val_chain->device);
+	val_munmap(image->memory, val_device_from_handle(val_chain->device));
 
 	return VK_SUCCESS;
 }
 
 static VkResult
-x11_swapchain_destroy(struct val_swapchain *val_chain,
+x11_swapchain_destroy(struct wsi_swapchain *val_chain,
                       const VkAllocationCallbacks *pAllocator)
 {
    struct x11_swapchain *chain = (struct x11_swapchain *)val_chain;
@@ -555,41 +597,52 @@ x11_swapchain_destroy(struct val_swapchain *val_chain,
       /* TODO: Delete images and free memory */
    }
 
-   vk_free2(&chain->base.device->alloc, pAllocator, chain);
+   vk_free(pAllocator, chain);
 
    return VK_SUCCESS;
 }
 
 static VkResult
 x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
-                             struct val_device *device,
+                             VkDevice device,
+                             struct wsi_device *wsi_device,
                              const VkSwapchainCreateInfoKHR *pCreateInfo,
                              const VkAllocationCallbacks* pAllocator,
-                             struct val_swapchain **swapchain_out)
+                             const struct wsi_image_fns *image_fns,
+                             struct wsi_swapchain **swapchain_out)
 {
-   VkIcdSurfaceXcb *surface = (VkIcdSurfaceXcb *)icd_surface;
    struct x11_swapchain *chain;
    xcb_void_cookie_t cookie;
    VkResult result;
 
-   int num_images = pCreateInfo->minImageCount;
-
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
 
+   const unsigned num_images = pCreateInfo->minImageCount;
+
    size_t size = sizeof(*chain) + num_images * sizeof(chain->images[0]);
-   chain = vk_alloc2(&device->alloc, pAllocator, size, 8,
+   chain = vk_alloc(pAllocator, size, 8,
                       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (chain == NULL)
-      return vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+   xcb_connection_t *conn = x11_surface_get_connection(icd_surface);
+   xcb_window_t window = x11_surface_get_window(icd_surface);
+   xcb_get_geometry_reply_t *geometry =
+      xcb_get_geometry_reply(conn, xcb_get_geometry(conn, window), NULL);
+
+   if (geometry == NULL)
+      return VK_ERROR_SURFACE_LOST_KHR;
 
    chain->base.device = device;
    chain->base.destroy = x11_swapchain_destroy;
    chain->base.get_images = x11_get_images;
    chain->base.acquire_next_image = x11_acquire_next_image;
    chain->base.queue_present = x11_queue_present;
-
-   chain->conn = surface->connection;
-   chain->window = surface->window;
+   chain->base.image_fns = image_fns;
+   chain->base.present_mode = pCreateInfo->presentMode;
+   chain->conn = conn;
+   chain->window = window;
+   chain->depth = geometry->depth;
    chain->extent = pCreateInfo->imageExtent;
    chain->image_count = num_images;
    chain->next_image = 0;
@@ -600,7 +653,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
       struct val_image *image;
       struct val_device_memory *memory;
 
-      val_image_create(val_device_to_handle(device),
+      val_image_create(device,
          &(struct val_image_create_info) {
             .bind_flags = 0,
             .stride = 0,
@@ -633,7 +686,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
         surface = &image->color_surface;
 */
 
-      val_AllocateMemory(val_device_to_handle(device),
+      val_AllocateMemory(device,
          &(VkMemoryAllocateInfo) {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = image->size,
@@ -644,7 +697,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
 
       memory = val_device_memory_from_handle(memory_h);
 //      memory->bo.is_winsys_bo = true;
-      val_BindImageMemory(val_device_to_handle(device), val_image_to_handle(image),
+      val_BindImageMemory(device, val_image_to_handle(image),
                           memory_h, 0);
 
       chain->images[i].image = image;
@@ -674,7 +727,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    chain->gc = xcb_generate_id(chain->conn);
    if (!chain->gc) {
       /* FINISHME: Choose a better error. */
-      result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+      result = VK_ERROR_OUT_OF_HOST_MEMORY;
       goto fail;
    }
 
@@ -694,25 +747,26 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
 }
 
 VkResult
-val_x11_init_wsi(struct val_physical_device *physical_device)
+val_x11_init_wsi(struct wsi_device *wsi_device,
+                 const VkAllocationCallbacks *alloc)
 {
    struct wsi_x11 *wsi;
    VkResult result;
 
-   wsi = vk_alloc(&physical_device->instance->alloc, sizeof(*wsi), 8,
+   wsi = vk_alloc(alloc, sizeof(*wsi), 8,
                    VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
    if (!wsi) {
-      result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+      result = VK_ERROR_OUT_OF_HOST_MEMORY;
       goto fail;
    }
 
    int ret = pthread_mutex_init(&wsi->mutex, NULL);
    if (ret != 0) {
       if (ret == ENOMEM) {
-         result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+         result = VK_ERROR_OUT_OF_HOST_MEMORY;
       } else {
          /* FINISHME: Choose a better error. */
-         result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+         result = VK_ERROR_OUT_OF_HOST_MEMORY;
       }
 
       goto fail_alloc;
@@ -721,7 +775,7 @@ val_x11_init_wsi(struct val_physical_device *physical_device)
    wsi->connections = _mesa_hash_table_create(NULL, _mesa_hash_pointer,
                                               _mesa_key_pointer_equal);
    if (!wsi->connections) {
-      result = vk_error(VK_ERROR_OUT_OF_HOST_MEMORY);
+      result = VK_ERROR_OUT_OF_HOST_MEMORY;
       goto fail_mutex;
    }
 
@@ -731,31 +785,18 @@ val_x11_init_wsi(struct val_physical_device *physical_device)
    wsi->base.get_present_modes = x11_surface_get_present_modes;
    wsi->base.create_swapchain = x11_surface_create_swapchain;
 
-   physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB] = &wsi->base;
+   wsi_device->wsi[VK_ICD_WSI_PLATFORM_XCB] = &wsi->base;
+   wsi_device->wsi[VK_ICD_WSI_PLATFORM_XLIB] = &wsi->base;
 
    return VK_SUCCESS;
 
 fail_mutex:
    pthread_mutex_destroy(&wsi->mutex);
 fail_alloc:
-   vk_free(&physical_device->instance->alloc, wsi);
+   vk_free(alloc, wsi);
 fail:
-   physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB] = NULL;
+   wsi_device->wsi[VK_ICD_WSI_PLATFORM_XCB] = NULL;
+   wsi_device->wsi[VK_ICD_WSI_PLATFORM_XLIB] = NULL;
 
    return result;
-}
-
-void
-val_x11_finish_wsi(struct val_physical_device *physical_device)
-{
-	struct wsi_x11 *wsi =
-		(struct wsi_x11 *)physical_device->wsi[VK_ICD_WSI_PLATFORM_XCB];
-
-	if (wsi) {
-		_mesa_hash_table_destroy(wsi->connections, NULL);
-
-		pthread_mutex_destroy(&wsi->mutex);
-
-		vk_free(&physical_device->instance->alloc, wsi);
-	}
 }

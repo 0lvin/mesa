@@ -25,49 +25,7 @@
 
 #include "val_private.h"
 
-struct val_swapchain;
+struct wsi_swapchain;
 
-struct val_wsi_interface {
-   VkResult (*get_support)(VkIcdSurfaceBase *surface,
-                           struct val_physical_device *device,
-                           uint32_t queueFamilyIndex,
-                           VkBool32* pSupported);
-   VkResult (*get_capabilities)(VkIcdSurfaceBase *surface,
-                                struct val_physical_device *device,
-                                VkSurfaceCapabilitiesKHR* pSurfaceCapabilities);
-   VkResult (*get_formats)(VkIcdSurfaceBase *surface,
-                           struct val_physical_device *device,
-                           uint32_t* pSurfaceFormatCount,
-                           VkSurfaceFormatKHR* pSurfaceFormats);
-   VkResult (*get_present_modes)(VkIcdSurfaceBase *surface,
-                                 struct val_physical_device *device,
-                                 uint32_t* pPresentModeCount,
-                                 VkPresentModeKHR* pPresentModes);
-   VkResult (*create_swapchain)(VkIcdSurfaceBase *surface,
-                                struct val_device *device,
-                                const VkSwapchainCreateInfoKHR* pCreateInfo,
-                                const VkAllocationCallbacks* pAllocator,
-                                struct val_swapchain **swapchain);
-};
-
-struct val_swapchain {
-   struct val_device *device;
-
-   VkResult (*destroy)(struct val_swapchain *swapchain,
-                       const VkAllocationCallbacks *pAllocator);
-   VkResult (*get_images)(struct val_swapchain *swapchain,
-                          uint32_t *pCount, VkImage *pSwapchainImages);
-   VkResult (*acquire_next_image)(struct val_swapchain *swap_chain,
-                                  uint64_t timeout, VkSemaphore semaphore,
-                                  uint32_t *image_index);
-   VkResult (*queue_present)(struct val_swapchain *swap_chain,
-                             struct val_queue *queue,
-                             uint32_t image_index);
-};
-
-VAL_DEFINE_NONDISP_HANDLE_CASTS(val_swapchain, VkSwapchainKHR)
-
-VkResult val_x11_init_wsi(struct val_physical_device *physical_device);
-void val_x11_finish_wsi(struct val_physical_device *physical_device);
+VkResult val_x11_init_wsi(struct wsi_device *wsi_device, const VkAllocationCallbacks *alloc);
 VkResult val_wl_init_wsi(struct val_physical_device *physical_device);
-void val_wl_finish_wsi(struct val_physical_device *physical_device);

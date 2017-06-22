@@ -181,17 +181,14 @@ mesa_to_vk_shader_stage(gl_shader_stage mesa_stage)
         stage = __builtin_ffs(__tmp) - 1, __tmp;                     \
         __tmp &= ~(1 << (stage)))
 
-struct val_wsi_interaface;
-#define VK_ICD_WSI_PLATFORM_MAX 5
-
 struct val_physical_device {
-    VK_LOADER_DATA                              _loader_data;
-    struct val_instance *                       instance;
+	VK_LOADER_DATA                              _loader_data;
+	struct val_instance *                       instance;
 
-    struct val_wsi_interface *                  wsi[VK_ICD_WSI_PLATFORM_MAX];
+	struct pipe_loader_device *pld;
+	struct pipe_screen *pscreen;
 
-    struct pipe_loader_device *pld;
-    struct pipe_screen *pscreen;
+	struct wsi_device wsi_device;
 };
 
 #define MAX_PHYSICAL_DEVICES 8
