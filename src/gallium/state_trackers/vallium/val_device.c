@@ -93,6 +93,14 @@ val_mmap(struct val_device_memory *mem, struct val_device *device)
 					    PIPE_TRANSFER_READ | PIPE_TRANSFER_WRITE,
 					    &mem->box,
 					    &mem->bo_t);
+		{
+			struct winsys_handle whandle;
+			memset(&whandle, 0, sizeof(whandle));
+			whandle.type= DRM_API_HANDLE_TYPE_FD;
+			unsigned usage = PIPE_HANDLE_USAGE_READ;
+			device->pscreen->resource_get_handle(device->pscreen, device->pctx, mem->bo, &whandle, usage);
+			fprintf(stderr, "handle = %d\n", whandle.handle);
+		}
 	}
 }
 
