@@ -144,6 +144,11 @@ EXTENSIONS = [
     Extension('VK_EXT_ycbcr_image_arrays',                1, False),
     Extension('VK_GOOGLE_decorate_string',                1, True),
     Extension('VK_GOOGLE_hlsl_functionality1',            1, True),
+    # ray tracing
+    Extension('VK_KHR_ray_tracing_pipeline',              1, True),
+    Extension('VK_KHR_acceleration_structure',              1, True),
+    Extension('VK_KHR_pipeline_library',              1, True),
+    Extension('VK_KHR_deferred_host_operations',              1, True),
 ]
 
 MAX_API_VERSION = VkVersion('0.0.0')
